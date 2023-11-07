@@ -239,7 +239,7 @@ void model_render_params::set_replacement_textures(int modelnum, const SCP_vecto
 
 	polymodel* pm = model_get(modelnum);
 
-	for (auto tr : replacement_textures) 
+	for (const auto& tr : replacement_textures) 
 	{
 		for (int i = 0; i < pm->n_textures; ++i) 
 		{
@@ -906,7 +906,7 @@ void model_render_add_lightning(model_draw_list *scene, const model_render_param
 			break;
 
 		default:
-			Int3();
+			UNREACHABLE("Unknown arc type of %d found in model_render_add_lightning(), please contact an SCP coder!", smi->arc_type[i]);
 		}
 
 		// render the actual arc segment
@@ -1840,7 +1840,10 @@ void model_render_glowpoint_add_light(int point_num, const vec3d *pos, const mat
 		vm_vec_sub(&loc_offset, &gpt->pnt, &submodel_static_offset);
 
 		tempv = loc_offset;
-		if (IS_VEC_NULL(&loc_norm)) {	// zero vectors are allowed for glowpoint norms
+
+		if (!pmi){
+			model_local_to_global_point(&loc_offset, &tempv, pm, bank->submodel_parent);
+		} else if (IS_VEC_NULL(&loc_norm)) {	// zero vectors are allowed for glowpoint norms
 			model_instance_local_to_global_point(&loc_offset, &tempv, pm, pmi, bank->submodel_parent);
 		} else {
 			vec3d tempn = loc_norm;
@@ -1891,7 +1894,11 @@ void model_render_glowpoint_add_light(int point_num, const vec3d *pos, const mat
 				cone_dir_rot = gpo->cone_direction;
 			}
 
-			model_instance_local_to_global_dir(&cone_dir_model, &cone_dir_rot, pm, pmi, bank->submodel_parent);
+			if (pmi)
+				model_instance_local_to_global_dir(&cone_dir_model, &cone_dir_rot, pm, pmi, bank->submodel_parent);
+			else 
+				cone_dir_model = cone_dir_rot;
+				
 			vm_vec_unrotate(&cone_dir_world, &cone_dir_model, orient);
 			vm_vec_rotate(&cone_dir_screen, &cone_dir_world, &Eye_matrix);
 			cone_dir_screen.xyz.z = -cone_dir_screen.xyz.z;
@@ -2345,6 +2352,9 @@ void model_queue_render_thrusters(const model_render_params *interp, const polym
 
 			// these lines are used by the tertiary glows, thus we will need to project this all of the time
 			g3_transfer_vertex( &p, &world_pnt );
+			
+			// these values are not used, but just appease the linters and future-proof
+			p.screen.xyw.x = 0.0f; p.screen.xyw.y = 0.0f; p.screen.xyw.w = 0.0f;
 
 			// start primary thruster glows
 			if ( (thruster_info.primary_glow_bitmap >= 0) && (d > 0.0f) ) {

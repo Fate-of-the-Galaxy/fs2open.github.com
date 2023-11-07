@@ -48,6 +48,7 @@ bool Enable_external_default_scripts;
 int Default_detail_level;
 bool Full_color_head_anis;
 bool Dont_automatically_select_turret_when_targeting_ship;
+bool Always_reset_selected_wep_on_loadout_open;
 bool Weapons_inherit_parent_collision_group;
 bool Flight_controls_follow_eyepoint_orientation;
 int FS2NetD_port;
@@ -145,6 +146,7 @@ bool Play_thruster_sounds_for_player;
 std::array<std::tuple<float, float>, 6> Fred_spacemouse_nonlinearity;
 bool Randomize_particle_rotation;
 bool Calculate_subsystem_hitpoints_after_parsing;
+bool Disable_internal_loadout_restoration_system;
 
 static auto DiscordOption __UNUSED = options::OptionBuilder<bool>("Other.Discord",
                      std::pair<const char*, int>{"Discord Presence", 1754},
@@ -288,6 +290,10 @@ void parse_mod_table(const char *filename)
 
 		if (optional_string("$Center splash logo:")) {
 			stuff_boolean(&Splash_logo_center);
+		}
+
+		if (optional_string("$Disable FSO Internal Loadout Restoration System:")) {
+			stuff_boolean(&Disable_internal_loadout_restoration_system);
 		}
 
 		optional_string("#LOCALIZATION SETTINGS");
@@ -1123,6 +1129,10 @@ void parse_mod_table(const char *filename)
 			}
 		}
 
+		if (optional_string("$Always refresh selected weapon when viewing loadout:")) {
+			stuff_boolean(&Always_reset_selected_wep_on_loadout_open);
+		}
+
 		if (optional_string("$Weapons inherit parent collision group:")) {
 			stuff_boolean(&Weapons_inherit_parent_collision_group);
 			if (Weapons_inherit_parent_collision_group)
@@ -1415,6 +1425,7 @@ void mod_table_reset()
 	Default_detail_level = 3; // "very high" seems a reasonable default in 2012 -zookeeper
 	Full_color_head_anis = false;
 	Dont_automatically_select_turret_when_targeting_ship = false;
+	Always_reset_selected_wep_on_loadout_open = false;
 	Weapons_inherit_parent_collision_group = false;
 	Flight_controls_follow_eyepoint_orientation = false;
 	FS2NetD_port = 0;
@@ -1519,6 +1530,7 @@ void mod_table_reset()
 		}};
 	Randomize_particle_rotation = false;
 	Calculate_subsystem_hitpoints_after_parsing = false;
+	Disable_internal_loadout_restoration_system = false;
 }
 
 void mod_table_set_version_flags()
