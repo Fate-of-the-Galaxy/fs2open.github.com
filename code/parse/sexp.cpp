@@ -36012,7 +36012,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	{ OP_NAV_ISLINKED, "is-nav-linked\r\n"
 		"Determines if a ship is linked for autopilot (\"set-nav-carry\" or \"set-nav-needslink\" + linked)"
 		"Takes 1 argument...\r\n"
-		"\t1:\tShip to check (ships must be in-mission)\r\n"},
+		"\t1:\tShip to check (evaluation is deferred until ship is in-mission)\r\n"},
 
 	{ OP_NAV_USECINEMATICS, "use-nav-cinematics\r\n"
 		"Controls the use of the cinematic autopilot camera. Takes 1 Argument..."
@@ -36130,40 +36130,40 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\t6: The z component of the second vector.\r\n"},
 
 	{ OP_SET_OBJECT_SPEED_X, "set-object-speed-x (deprecated in favor of ship-maneuver)\r\n"
-		"\tSets the X speed of a ship or wing (ship or wing must be in-mission)."
+		"\tSets the X speed of a ship or wing (ship/wing must be in-mission)."
 		"Takes 2 or 3 arguments...\r\n"
 		"\t1: The name of the object.\r\n"
 		"\t2: The speed to set.\r\n"
 		"\t3: Whether the speed on the axis should be set according to the universe grid (when false) or according to the object's facing (when true); You almost always want to set this to true; (optional; defaults to false).\r\n" },
 
 	{ OP_SET_OBJECT_SPEED_Y, "set-object-speed-y (deprecated in favor of ship-maneuver)\r\n"
-		"\tSets the Y speed of a ship or wing (ship or wing must be in-mission)."
+		"\tSets the Y speed of a ship or wing (ship/wing must be in-mission)."
 		"Takes 2 or 3 arguments...\r\n"
 		"\t1: The name of the object.\r\n"
 		"\t2: The speed to set.\r\n"
 		"\t3: Whether the speed on the axis should be set according to the universe grid (when false) or according to the object's facing (when true); You almost always want to set this to true; (optional; defaults to false).\r\n" },
 
 	{ OP_SET_OBJECT_SPEED_Z, "set-object-speed-z (deprecated in favor of ship-maneuver)\r\n"
-		"\tSets the Z speed of a ship or wing (ship or wing must be in-mission)."
+		"\tSets the Z speed of a ship or wing (ship/wing must be in-mission)."
 		"Takes 2 or 3 arguments...\r\n"
 		"\t1: The name of the object.\r\n"
 		"\t2: The speed to set.\r\n"
 		"\t3: Whether the speed on the axis should be set according to the universe grid (when false) or according to the object's facing (when true); You almost always want to set this to true; (optional; defaults to false).\r\n" },
 
 	{ OP_GET_OBJECT_SPEED_X, "get-object-speed-x\r\n"
-		"\tReturns the X speed of a ship or wing as an integer (ship or wing must be in-mission)."
+		"\tReturns the X speed of a ship or wing as an integer (ship/wing must be in-mission)."
 		"Takes 2 or 3 arguments...\r\n"
 		"\t1: The name of the object.\r\n"
 		"\t2: Whether the speed on the axis should be set according to the universe grid (when false) or according to the object's facing (when true); You almost always want to set this to true; (optional; defaults to false).\r\n" },
 
 	{ OP_GET_OBJECT_SPEED_Y, "get-object-speed-y\r\n"
-		"\tReturns the Y speed of a ship or wing as an integer (ship or wing must be in-mission)."
+		"\tReturns the Y speed of a ship or wing as an integer (ship/wing must be in-mission)."
 		"Takes 2 or 3 arguments...\r\n"
 		"\t1: The name of the object.\r\n"
 		"\t2: Whether the speed on the axis should be set according to the universe grid (when false) or according to the object's facing (when true); You almost always want to set this to true; (optional; defaults to false).\r\n" },
 
 	{ OP_GET_OBJECT_SPEED_Z, "get-object-speed-z\r\n"
-		"\tReturns the Z speed of a ship or wing as an integer (ship or wing must be in-mission)."
+		"\tReturns the Z speed of a ship or wing as an integer (ship/wing must be in-mission)."
 		"Takes 2 or 3 arguments...\r\n"
 		"\t1: The name of the object.\r\n"
 		"\t2: Whether the speed on the axis should be set according to the universe grid (when false) or according to the object's facing (when true); You almost always want to set this to true; (optional; defaults to false).\r\n" },
@@ -36216,17 +36216,17 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	// Goober5000
 	{ OP_GET_OBJECT_PITCH, "get-object-pitch\r\n"
 		"\tReturns the pitch angle, in degrees, of a particular object.  The returned value will be between 0 and 360.  Takes 1 argument...\r\n"
-		"\t1: The name of a ship or wing (ship or wing must be in-mission).\r\n" },
+		"\t1: The name of a ship or wing (ship/wing must be in-mission).\r\n" },
 
 	// Goober5000
 	{ OP_GET_OBJECT_BANK, "get-object-bank\r\n"
 		"\tReturns the bank angle, in degrees, of a particular object.  The returned value will be between 0 and 360.  Takes 1 argument...\r\n"
-		"\t1: The name of a ship or wing (ship or wing must be in-mission).\r\n" },
+		"\t1: The name of a ship or wing (ship/wing must be in-mission).\r\n" },
 
 	// Goober5000
 	{ OP_GET_OBJECT_HEADING, "get-object-heading\r\n"
 		"\tReturns the heading angle, in degrees, of a particular object.  The returned value will be between 0 and 360.  Takes 1 argument...\r\n"
-		"\t1: The name of a ship or wing (ship or wing must be in-mission).\r\n" },
+		"\t1: The name of a ship or wing (ship/wing must be in-mission).\r\n" },
 
 	// Goober5000
 	{ OP_SET_OBJECT_ORIENTATION, "set-object-orientation\r\n"
@@ -36324,7 +36324,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\tTrue if ship or ship subsystem(s) is/are all of the specified AI class.\r\n\r\n"
 		"Returns a boolean value.  Takes 2 or more arguments...\r\n"
 		"\t1:\tAI class (\"None\", \"Coward\", \"Lieutenant\", etc.)\r\n"
-		"\t2:\tName of ship to check (ship must be in-mission).\r\n"
+		"\t2:\tName of ship to check (evaluation is deferred until ship is in-mission).\r\n"
 		"\tRest:\tName of ship subsystem(s) to check (optional)" },
 
 	// Goober5000
@@ -36332,14 +36332,14 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\tTrue if ship or ships is/are all of the specified ship type.\r\n\r\n"
 		"Returns a boolean value.  Takes 2 or more arguments...\r\n"
 		"\t1:\tShip type (\"fighter\", \"bomber\", etc.)\r\n"
-		"\t2:\tName of ship to check.\r\n" },
+		"\t2:\tName of ship to check (ship/wing does not need to be in-mission) .\r\n" },
 
 	// Goober5000
 	{ OP_IS_SHIP_CLASS, "Is Ship Class (Boolean operator)\r\n"
 		"\tTrue if ship or ships is/are all of the specified ship class.\r\n\r\n"
 		"Returns a boolean value.  Takes 2 or more arguments...\r\n"
 		"\t1:\tShip class\r\n"
-		"\t2:\tName of ship to check (ship must be in-mission).\r\n" },
+		"\t2:\tName of ship to check (ship/wing does not need to be in-mission) .\r\n" },
 
 	{ OP_HAS_TIME_ELAPSED, "Has time elapsed (Boolean operator)\r\n"
 		"\tBecomes true when the specified amount of time has elapsed (Mission time "
@@ -36471,7 +36471,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\t1:\tName of the event in the mission."},
 
 	{ OP_IS_DESTROYED_DELAY, "Is destroyed delay (Boolean operator)\r\n"
-		"\tBecomes true <delay> seconds after all specified ships (including listed ships not in-mission) have been destroyed.\r\n"
+		"\tBecomes true <delay> seconds after all specified ships have been destroyed.\r\n"
 		"\tWARNING: If multiple is-destroyed-delay SEXPs are used in a directive event, unexpected results may be "
 		"observed. Instead, use a single is-destroyed-delay SEXP with multiple parameters.\r\n"
 		"Returns a boolean value.  Takes 2 or more arguments...\r\n"
@@ -36479,7 +36479,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\tRest:\tName of ship (or wing) to check status of." },
 
 	{ OP_WAS_DESTROYED_BY_DELAY, "Was destroyed by delay (Boolean operator)\r\n"
-		"\tBecomes true <delay> seconds after all specified ships (including listed ships not in-mission) have been destroyed by the specified first ship.\r\n\r\n"
+		"\tBecomes true <delay> seconds after all specified ships have been destroyed by the specified first ship.\r\n\r\n"
 		"Returns a boolean value.  Takes 3 or more arguments...\r\n"
 		"\t1:\tTime delay in seconds (see above).\r\n"
 		"\t2:\tShip that should have destroyed the other ships (see below).\r\n"
@@ -36556,10 +36556,10 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"transport, etc.  Fighters and bombers count as the same type.\r\n\r\n"
 		"Returns a boolean value.  Takes 2 arguments...\r\n"
 		"\t1:\tPercentage of ships that must be destroyed.\r\n"
-		"\t2:\tShip type to check for." },								// needs tested to see if not yet in-mission ships are included in percentage
+		"\t2:\tShip type to check for." },
 
 	{ OP_TIME_SHIP_DESTROYED, "Time ship destroyed (Time operator)\r\n"
-		"\tReturns the time the specified ship was destroy.\r\n\r\n"
+		"\tReturns the time the specified ship was destroyed.\r\n\r\n"
 		"Returns a numeric value.  Takes 1 argument...\r\n"
 		"\t1:\tName of ship we want to check." },
 
@@ -36616,7 +36616,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	{ OP_TIME_TO_GOAL, "Time-to-goal (Time operator)\r\n"
 		"\tReturns the number of seconds until a ship reaches its waypoint\r\n\r\n"
 		"Returns a number value.  Takes 1 argument...\r\n"
-		"\t1:\tName of ship to check waypoint time (evaluates when ship is in-mission)." },
+		"\t1:\tName of ship to check waypoint time." },
 
 	// MjnMixael
 	{ OP_SET_HUD_TIME_PAD, "Set HUD Timer Padding (Action operator)\r\n"
@@ -36628,21 +36628,21 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 
 	{ OP_AFTERBURNER_LEFT, "Afterburner left\r\n"
 		"\tReturns a ship's current engine energy as a percentage.\r\n"
-		"\t1: Ship name (evaluates when ship is in-mission)\r\n" },
+		"\t1: Ship name (evaluation is deferred until ship is in-mission)\r\n" },
 
 	{ OP_WEAPON_ENERGY_LEFT, "Weapon energy left\r\n"
 		"\tReturns a ship's current weapon energy as a percentage.\r\n"
-		"\t1: Ship name (evaluates when ship is in-mission)\r\n" },
+		"\t1: Ship name (evaluation is deferred until ship is in-mission)\r\n" },
 
 	{ OP_SHIELDS_LEFT, "Shields left (Status operator)\r\n"
 		"\tReturns the current level of the specified ship's shields as a percentage.\r\n\r\n"
 		"Returns a numeric value.  Takes 1 argument...\r\n"
-		"\t1:\tName of ship to check (evaluates when ship is in-mission)." },
+		"\t1:\tName of ship to check (evaluation is deferred until ship is in-mission)." },
 
 	{ OP_HITS_LEFT, "Hits left (Status operator)\r\n"
 		"\tReturns the current level of the specified ship's hull as a percentage.\r\n\r\n"
 		"Returns a numeric value.  Takes 1 argument...\r\n"
-		"\t1:\tName of ship to check (evaluates when ship is in-mission)." },
+		"\t1:\tName of ship to check (evaluation is deferred until ship is in-mission)." },
 
 	{ OP_HITS_LEFT_SUBSYSTEM, "Hits left subsystem (status operator, deprecated)\r\n"
 		"\tReturns the current level of the specified ship's subsystem integrity as a percentage of the damage done to *all "
@@ -36652,7 +36652,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"this operator is deprecated.  Mission designers are strongly encouraged to use hits-left-subsystem-specific rather than "
 		"the optional boolean parameter.\r\n\r\n"
 		"Returns a numeric value.  Takes 2 or 3 arguments...\r\n"
-		"\t1:\tName of ship to check (evaluates when ship is in-mission).\r\n"
+		"\t1:\tName of ship to check (evaluation is deferred until ship is in-mission).\r\n"
 		"\t2:\tName of subsystem on ship to check.\r\n"
 		"\t3:\t(Optional) True/False. When set to true only the subsystem supplied will be tested; when set to false (the default), "
 		"all subsystems of that type will be tested." },
@@ -36664,7 +36664,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"example, if the integrity of all engine subsystems (that is, the combined strength of all engines divided by the maximum "
 		"total strength of all engines) is less than 30%, the player cannot warp out.\r\n\r\n"
 		"Returns a numeric value.  Takes 2 arguments...\r\n"
-		"\t1:\tName of ship to check (evaluates when ship is in-mission)\r\n"
+		"\t1:\tName of ship to check (evaluation is deferred until ship is in-mission)\r\n"
 		"\t2:\tName of subsystem type to check\r\n" },
 
 	{ OP_HITS_LEFT_SUBSYSTEM_SPECIFIC, "hits-left-subsystem-specific (status operator)\r\n"
@@ -36674,13 +36674,13 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"and will not appear in the operator list; it can only be used if you type it in manually.  Old missions using hits-left-subsystem "
 		"will still work, but mission designers are strongly encouraged to use the new operators instead.)\r\n\r\n"
 		"Returns a numeric value.  Takes 2 arguments...\r\n"
-		"\t1:\tName of ship to check (evaluates when ship is in-mission)\r\n"
+		"\t1:\tName of ship to check (evaluation is deferred until ship is in-mission)\r\n"
 		"\t2:\tName of subsystem to check\r\n" },
 
 	{ OP_SIM_HITS_LEFT, "Simulated Hits left (Status operator)\r\n"
 		"\tReturns the current level of the specified ship's simulated hull as a percentage.\r\n\r\n"
 		"Returns a numeric value.  Takes 1 argument...\r\n"
-		"\t1:\tName of ship to check (evaluates when ship is in-mission)." },
+		"\t1:\tName of ship to check (evaluation is deferred until ship is in-mission)." },
 
 	{ OP_DISTANCE, "Distance (Status operator)\r\n"
 		"\tReturns the distance between two objects.  These can be ships, wings, or waypoints.\r\n"
@@ -36761,7 +36761,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	{ OP_HAS_ARMOR_TYPE, "has-armor-type (Status operator)\r\n"
 		"\tChecks if a given ship has a specific armor type.\r\n\r\n"
 		"Takes 3 arguments...\r\n"
-		"\t1:\tThe ship to check (evaluates when the ship is in-mission)\r\n"
+		"\t1:\tThe ship to check (evaluation is deferred until ship is in-mission)\r\n"
 		"\t2:\tThe armor type to check\r\n"
 		"\t3:\tThe subsystem armor to check" },
 
@@ -36771,13 +36771,13 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"Takes 1 or more arguments.  (If more than 2 arguments are specified, the sexp will only evaluate to true if all ships are docked simultaneously.)\r\n"
 		"If a single argument is supplied, the sexp will evaluate to true if anything is docked to the host ship. \r\n"
 		"\t1:\tThe host ship.\r\n"
-		"\tRest:\tShip to check as docked to the host ship (evaluates when the ship is in-mission)." },
+		"\tRest:\tShip to check as docked to the host ship (evaluation is deferred until ship is in-mission)." },
 
 	{ OP_GET_DAMAGE_CAUSED, "Get damage caused (Status operator)\r\n"
 		"\tReturns the amount of damage one or more ships have done to a ship.\r\n\r\n"
 		"Takes 2 or more arguments...\r\n"
 		"\t1:\tShip that has been damaged.\r\n"
-		"\t2:\tName of ships that may have damaged it." },  			// may need further clarification
+		"\t2:\tName of ships that may have damaged it." },
 
 	{ OP_LAST_ORDER_TIME, "Last order time (Status operator)\r\n"
 		"\tReturns true if <count> seconds have elapsed since one or more ships have received "
@@ -36785,7 +36785,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"is not the warp out order.\r\n\r\n"
 		"Returns a boolean value.  Takes 2 or more arguments...\r\n"
 		"\t1:\tTime in seconds that must elapse.\r\n"
-		"\tRest:\tName of ship or wing to check for having received orders (ship/wing must be in mission)." },
+		"\tRest:\tName of ship (must be in-mission) or wing (does not need to be in-mission) to check for having received orders." },
 
 	{ OP_WHEN, "When (Conditional operator)\r\n"
 		"\tPerforms specified actions when a condition becomes true\r\n\r\n"
@@ -38749,7 +38749,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\t14:\tSecond Z coordinate to fire at (optional; used for slash beams)\r\n" },
 
 	{ OP_IS_TAGGED, "is-tagged\r\n"
-		"\tReturns whether a given ship is tagged or not (evaluates when ship is in-mission)\r\n"},
+		"\tReturns whether a given ship is tagged or not (evaluation is deferred until ship is in-mission)\r\n"},
 
 	{ OP_IS_PLAYER, "is-player\r\n"
 		"\tReturns true if all the ships specified are currently under control of a player.\r\n"
@@ -39283,7 +39283,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\tCopies the damage (hull, shields, and subsystems) from the first ship in the list to the rest.  The initial ship must be currently "
 		"present in the mission, but the target ships may be either in-mission or on the arrival list.  Takes 2 or more arguments...\r\n"
 		"\t1: The name of the ship that supplies the damage stats\r\n"
-		"\tRest: The list of ships to be modified"				// ships must be in-mission?
+		"\tRest: The list of ships to be modified"
 	},
 
 	// Goober5000
