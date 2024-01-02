@@ -36012,7 +36012,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	{ OP_NAV_ISLINKED, "is-nav-linked\r\n"
 		"Determines if a ship is linked for autopilot (\"set-nav-carry\" or \"set-nav-needslink\" + linked)"
 		"Takes 1 argument...\r\n"
-		"\t1:\tShip to check (evaluation is deferred until ship is in-mission)\r\n"},
+		"\t1:\tShip to check (evaluation returns NAN until ship is in-mission)\r\n"},
 
 	{ OP_NAV_USECINEMATICS, "use-nav-cinematics\r\n"
 		"Controls the use of the cinematic autopilot camera. Takes 1 Argument..."
@@ -36324,7 +36324,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\tTrue if ship or ship subsystem(s) is/are all of the specified AI class.\r\n\r\n"
 		"Returns a boolean value.  Takes 2 or more arguments...\r\n"
 		"\t1:\tAI class (\"None\", \"Coward\", \"Lieutenant\", etc.)\r\n"
-		"\t2:\tName of ship to check (evaluation is deferred until ship is in-mission).\r\n"
+		"\t2:\tName of ship to check (evaluation returns NAN until ship is in-mission).\r\n"
 		"\tRest:\tName of ship subsystem(s) to check (optional)" },
 
 	// Goober5000
@@ -36471,7 +36471,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\t1:\tName of the event in the mission."},
 
 	{ OP_IS_DESTROYED_DELAY, "Is destroyed delay (Boolean operator)\r\n"
-		"\tBecomes true <delay> seconds after all specified ships have been destroyed.\r\n"
+		"\tBecomes true <delay> seconds after all specified ships (including listed ships not in-mission) have been destroyed.\r\n"
 		"\tWARNING: If multiple is-destroyed-delay SEXPs are used in a directive event, unexpected results may be "
 		"observed. Instead, use a single is-destroyed-delay SEXP with multiple parameters.\r\n"
 		"Returns a boolean value.  Takes 2 or more arguments...\r\n"
@@ -36479,7 +36479,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\tRest:\tName of ship (or wing) to check status of." },
 
 	{ OP_WAS_DESTROYED_BY_DELAY, "Was destroyed by delay (Boolean operator)\r\n"
-		"\tBecomes true <delay> seconds after all specified ships have been destroyed by the specified first ship.\r\n\r\n"
+		"\tBecomes true <delay> seconds after all specified ships (including listed ships not in-mission) have been destroyed by the specified first ship.\r\n\r\n"
 		"Returns a boolean value.  Takes 3 or more arguments...\r\n"
 		"\t1:\tTime delay in seconds (see above).\r\n"
 		"\t2:\tShip that should have destroyed the other ships (see below).\r\n"
@@ -36552,7 +36552,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 
 	{ OP_SHIP_TYPE_DESTROYED, "Ship Type Destroyed (Boolean operator)\r\n"
 		"\tBecomes true when the specified percentage of ship types in this mission "
-		"have been destroyed.  The ship type is a generic type such as fighter/bomber, "
+		"have been destroyed (including ships not yet in-mission).  The ship type is a generic type such as fighter/bomber, "
 		"transport, etc.  Fighters and bombers count as the same type.\r\n\r\n"
 		"Returns a boolean value.  Takes 2 arguments...\r\n"
 		"\t1:\tPercentage of ships that must be destroyed.\r\n"
@@ -36616,7 +36616,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	{ OP_TIME_TO_GOAL, "Time-to-goal (Time operator)\r\n"
 		"\tReturns the number of seconds until a ship reaches its waypoint\r\n\r\n"
 		"Returns a number value.  Takes 1 argument...\r\n"
-		"\t1:\tName of ship to check waypoint time." },
+		"\t1:\tName of ship to check waypoint time (evaluation is deferred until ship is in-mission)." },
 
 	// MjnMixael
 	{ OP_SET_HUD_TIME_PAD, "Set HUD Timer Padding (Action operator)\r\n"
@@ -36628,21 +36628,21 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 
 	{ OP_AFTERBURNER_LEFT, "Afterburner left\r\n"
 		"\tReturns a ship's current engine energy as a percentage.\r\n"
-		"\t1: Ship name (evaluation is deferred until ship is in-mission)\r\n" },
+		"\t1: Ship name (evaluation returns NAN until ship is in-mission)\r\n" },
 
 	{ OP_WEAPON_ENERGY_LEFT, "Weapon energy left\r\n"
 		"\tReturns a ship's current weapon energy as a percentage.\r\n"
-		"\t1: Ship name (evaluation is deferred until ship is in-mission)\r\n" },
+		"\t1: Ship name (evaluation returns NAN until ship is in-mission)\r\n" },
 
 	{ OP_SHIELDS_LEFT, "Shields left (Status operator)\r\n"
 		"\tReturns the current level of the specified ship's shields as a percentage.\r\n\r\n"
 		"Returns a numeric value.  Takes 1 argument...\r\n"
-		"\t1:\tName of ship to check (evaluation is deferred until ship is in-mission)." },
+		"\t1:\tName of ship to check (evaluation returns NAN until ship is in-mission)." },
 
 	{ OP_HITS_LEFT, "Hits left (Status operator)\r\n"
 		"\tReturns the current level of the specified ship's hull as a percentage.\r\n\r\n"
 		"Returns a numeric value.  Takes 1 argument...\r\n"
-		"\t1:\tName of ship to check (evaluation is deferred until ship is in-mission)." },
+		"\t1:\tName of ship to check (evaluation returns NAN until ship is in-mission)." },
 
 	{ OP_HITS_LEFT_SUBSYSTEM, "Hits left subsystem (status operator, deprecated)\r\n"
 		"\tReturns the current level of the specified ship's subsystem integrity as a percentage of the damage done to *all "
@@ -36652,7 +36652,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"this operator is deprecated.  Mission designers are strongly encouraged to use hits-left-subsystem-specific rather than "
 		"the optional boolean parameter.\r\n\r\n"
 		"Returns a numeric value.  Takes 2 or 3 arguments...\r\n"
-		"\t1:\tName of ship to check (evaluation is deferred until ship is in-mission).\r\n"
+		"\t1:\tName of ship to check (evaluation returns NAN until ship is in-mission).\r\n"
 		"\t2:\tName of subsystem on ship to check.\r\n"
 		"\t3:\t(Optional) True/False. When set to true only the subsystem supplied will be tested; when set to false (the default), "
 		"all subsystems of that type will be tested." },
@@ -36664,7 +36664,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"example, if the integrity of all engine subsystems (that is, the combined strength of all engines divided by the maximum "
 		"total strength of all engines) is less than 30%, the player cannot warp out.\r\n\r\n"
 		"Returns a numeric value.  Takes 2 arguments...\r\n"
-		"\t1:\tName of ship to check (evaluation is deferred until ship is in-mission)\r\n"
+		"\t1:\tName of ship to check (evaluation returns NAN until ship is in-mission)\r\n"
 		"\t2:\tName of subsystem type to check\r\n" },
 
 	{ OP_HITS_LEFT_SUBSYSTEM_SPECIFIC, "hits-left-subsystem-specific (status operator)\r\n"
@@ -36674,20 +36674,20 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"and will not appear in the operator list; it can only be used if you type it in manually.  Old missions using hits-left-subsystem "
 		"will still work, but mission designers are strongly encouraged to use the new operators instead.)\r\n\r\n"
 		"Returns a numeric value.  Takes 2 arguments...\r\n"
-		"\t1:\tName of ship to check (evaluation is deferred until ship is in-mission)\r\n"
+		"\t1:\tName of ship to check (evaluation returns NAN until ship is in-mission)\r\n"
 		"\t2:\tName of subsystem to check\r\n" },
 
 	{ OP_SIM_HITS_LEFT, "Simulated Hits left (Status operator)\r\n"
 		"\tReturns the current level of the specified ship's simulated hull as a percentage.\r\n\r\n"
 		"Returns a numeric value.  Takes 1 argument...\r\n"
-		"\t1:\tName of ship to check (evaluation is deferred until ship is in-mission)." },
+		"\t1:\tName of ship to check (evaluation returns NAN until ship is in-mission)." },
 
 	{ OP_DISTANCE, "Distance (Status operator)\r\n"
 		"\tReturns the distance between two objects.  These can be ships, wings, or waypoints.\r\n"
 		"When a wing or team is given (for either argument), the result will be the closest distance.\r\n\r\n"
 		"NOTE: The standard retail SEXP measures between the center of one ship and the bounding box of another.  It is "
 		"recommended to use center-distance or bbox-distance.\r\n\r\n"
-		"Returns a numeric value.  Takes 2 arguments...\r\n"
+		"Returns a numeric value.  Takes 2 arguments (evaluation returns NAN until both objects are in-mission).\r\n"
 		"\t1:\tThe name of one of the objects.\r\n"
 		"\t2:\tThe name of the other object."
 	},
@@ -36695,7 +36695,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	{ OP_DISTANCE_CENTER, "Distance-To-Center (Status operator)\r\n"
 		"\tReturns the distance between the centers of two objects.  These can be ships, wings, or waypoints.\r\n"
 		"When a wing or team is given (for either argument), the result will be the closest distance.\r\n\r\n"
-		"Returns a numeric value.  Takes 2 arguments...\r\n"
+		"Returns a numeric value.  Takes 2 arguments (evaluation returns NAN until both objects are in-mission).\r\n"
 		"\t1:\tThe name of one of the objects.\r\n"
 		"\t2:\tThe name of the other object."
 	},
@@ -36703,7 +36703,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	{ OP_DISTANCE_BBOX, "Distance-To-BBox (Status operator)\r\n"
 		"\tReturns the distance between the bounding boxes of two objects.  These can be ships, wings, or waypoints.\r\n"
 		"When a wing or team is given (for either argument), the result will be the closest distance.\r\n\r\n"
-		"Returns a numeric value.  Takes 2 arguments...\r\n"
+		"Returns a numeric value.  Takes 2 arguments (evaluation returns NAN until both objects are in-mission).\r\n"
 		"\t1:\tThe name of one of the objects.\r\n"
 		"\t2:\tThe name of the other object."
 	},
@@ -36711,7 +36711,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	{ OP_DISTANCE_CENTER_SUBSYSTEM, "Center distance from ship subsystem (Status operator)\r\n"
 		"\tReturns the distance between the center of an object and the center of a ship subsystem.  The object can be a ship, wing, or waypoint.\r\n"
 		"When a wing or team is given, the result will be the closest distance.\r\n\r\n"
-		"Returns a numeric value.  Takes 3 arguments...\r\n"
+		"Returns a numeric value.  Takes 3 arguments (evaluation returns NAN until both objects are in-mission).\r\n"
 		"\t1:\tThe name of the object.\r\n"
 		"\t2:\tThe name of the ship which houses the subsystem.\r\n"
 		"\t3:\tThe name of the subsystem." },
@@ -36719,7 +36719,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	{ OP_DISTANCE_BBOX_SUBSYSTEM, "BBox distance from ship subsystem (Status operator)\r\n"
 		"\tReturns the distance between the bounding box of an object and the center of a ship subsystem.  The object can be a ship, wing, or waypoint.\r\n"
 		"When a wing or team is given, the result will be the closest distance.\r\n\r\n"
-		"Returns a numeric value.  Takes 3 arguments...\r\n"
+		"Returns a numeric value.  Takes 3 arguments (evaluation returns NAN until both objects are in-mission).\r\n"
 		"\t1:\tThe name of the object.\r\n"
 		"\t2:\tThe name of the ship which houses the subsystem.\r\n"
 		"\t3:\tThe name of the subsystem." },
@@ -36761,7 +36761,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	{ OP_HAS_ARMOR_TYPE, "has-armor-type (Status operator)\r\n"
 		"\tChecks if a given ship has a specific armor type.\r\n\r\n"
 		"Takes 3 arguments...\r\n"
-		"\t1:\tThe ship to check (evaluation is deferred until ship is in-mission)\r\n"
+		"\t1:\tThe ship to check (evaluation returns NAN until ship is in-mission)\r\n"
 		"\t2:\tThe armor type to check\r\n"
 		"\t3:\tThe subsystem armor to check" },
 
@@ -36771,7 +36771,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"Takes 1 or more arguments.  (If more than 2 arguments are specified, the sexp will only evaluate to true if all ships are docked simultaneously.)\r\n"
 		"If a single argument is supplied, the sexp will evaluate to true if anything is docked to the host ship. \r\n"
 		"\t1:\tThe host ship.\r\n"
-		"\tRest:\tShip to check as docked to the host ship (evaluation is deferred until ship is in-mission)." },
+		"\tRest:\tShip to check as docked to the host ship (evaluation returns NAN until ship is in-mission)." },
 
 	{ OP_GET_DAMAGE_CAUSED, "Get damage caused (Status operator)\r\n"
 		"\tReturns the amount of damage one or more ships have done to a ship.\r\n\r\n"
@@ -38749,7 +38749,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\t14:\tSecond Z coordinate to fire at (optional; used for slash beams)\r\n" },
 
 	{ OP_IS_TAGGED, "is-tagged\r\n"
-		"\tReturns whether a given ship is tagged or not (evaluation is deferred until ship is in-mission)\r\n"},
+		"\tReturns whether a given ship is tagged or not (evaluation returns NAN until ship is in-mission)\r\n"},
 
 	{ OP_IS_PLAYER, "is-player\r\n"
 		"\tReturns true if all the ships specified are currently under control of a player.\r\n"
@@ -39280,8 +39280,8 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 
 	// Goober5000
 	{ OP_SHIP_COPY_DAMAGE, "ship-copy-damage\r\n"
-		"\tCopies the damage (hull, shields, and subsystems) from the first ship in the list to the rest.  The initial ship must be currently "
-		"present in the mission, but the target ships may be either in-mission or on the arrival list.  Takes 2 or more arguments...\r\n"
+		"\tCopies the damage (hull, shields, and subsystems) from the first ship in the list to the rest.  The ship being copied from needs "
+		"to be in-mission, but the ship being copied to does not have to be.  Takes 2 or more arguments...\r\n"
 		"\t1: The name of the ship that supplies the damage stats\r\n"
 		"\tRest: The list of ships to be modified"
 	},
@@ -39794,7 +39794,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	// Karajora
 	{ OP_HAS_PRIMARY_WEAPON, "has-primary-weapon\r\n"
 		"\tReturns true if the primary weapon bank specified has any of the weapons listed. Takes 3 or more arguments...\r\n\r\n"
-		"\t1:\tShip name (evaluated when ship is in-mission)\r\n"
+		"\t1:\tShip name (evaluation returns NAN until the ship is in-mission)\r\n"
 		"\t2:\tWeapon bank number (This is a zero-based index. The first bank is numbered 0.)\r\n"
 		"\tRest:\tWeapon name\r\n"
 	},
@@ -39802,7 +39802,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	// Karajora
 	{ OP_HAS_SECONDARY_WEAPON, "has-secondary-weapon\r\n"
 		"\tReturns true if the secondary weapon bank specified has any of the weapons listed. Takes 3 or more arguments...\r\n\r\n"
-		"\t1:\tShip name (evaluated when ship is in-mission)\r\n"
+		"\t1:\tShip name (evaluation returns NAN until the ship is in-mission)\r\n"
 		"\t2:\tWeapon bank number (This is a zero-based index. The first bank is numbered 0.)\r\n"
 		"\tRest:\tWeapon name\r\n"
 	},
@@ -39810,7 +39810,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	// MjnMixael
 	{ OP_TURRET_HAS_PRIMARY_WEAPON, "turret-has-primary-weapon\r\n"
 		"\tReturns true if the turret specified has any of the weapons listed. Takes 3 or more arguments...\r\n\r\n"
-		"\t1:\tShip name (ship must be in-mission)\r\n"
+		"\t1:\tShip name (evaluation returns NAN until the ship is in-mission)\r\n"
 		"\t2:\tTurret to check\r\n"
 		"\t3:\tTurret bank number (This is a zero-based index. The first bank is numbered 0.)\r\n"
 		"\tRest:\tWeapon name\r\n"
@@ -39819,7 +39819,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	// MjnMixael
 	{ OP_TURRET_HAS_SECONDARY_WEAPON, "turret-has-secondary-weapon\r\n"
 		"\tReturns true if the turret specified has any of the weapons listed. Takes 3 or more arguments...\r\n\r\n"
-		"\t1:\tShip name (ship must be in-mission)\r\n"
+		"\t1:\tShip name (evaluation returns NAN until the ship is in-mission)\r\n"
 		"\t2:\tTurret to check\r\n"
 		"\t3:\tTurret bank number (This is a zero-based index. The first bank is numbered 0.)\r\n"
 		"\tRest:\tWeapon name\r\n"
