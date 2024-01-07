@@ -36151,19 +36151,19 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\t3: Whether the speed on the axis should be set according to the universe grid (when false) or according to the object's facing (when true); You almost always want to set this to true; (optional; defaults to false).\r\n" },
 
 	{ OP_GET_OBJECT_SPEED_X, "get-object-speed-x\r\n"
-		"\tReturns the X speed of a ship or wing as an integer (evaluation returns NAN until ship is in-mission)."
+		"\tReturns the X speed of a ship or wing as an integer (evaluation returns NAN until ship/wing is in-mission)."
 		"Takes 2 or 3 arguments...\r\n"
 		"\t1: The name of the object.\r\n"
 		"\t2: Whether the speed on the axis should be set according to the universe grid (when false) or according to the object's facing (when true); You almost always want to set this to true; (optional; defaults to false).\r\n" },
 
 	{ OP_GET_OBJECT_SPEED_Y, "get-object-speed-y\r\n"
-		"\tReturns the Y speed of a ship or wing as an integer (evaluation returns NAN until ship is in-mission)."
+		"\tReturns the Y speed of a ship or wing as an integer (evaluation returns NAN until ship/wing is in-mission)."
 		"Takes 2 or 3 arguments...\r\n"
 		"\t1: The name of the object.\r\n"
 		"\t2: Whether the speed on the axis should be set according to the universe grid (when false) or according to the object's facing (when true); You almost always want to set this to true; (optional; defaults to false).\r\n" },
 
 	{ OP_GET_OBJECT_SPEED_Z, "get-object-speed-z\r\n"
-		"\tReturns the Z speed of a ship or wing as an integer (evaluation returns NAN until ship is in-mission)."
+		"\tReturns the Z speed of a ship or wing as an integer (evaluation returns NAN until ship/wing is in-mission)."
 		"Takes 2 or 3 arguments...\r\n"
 		"\t1: The name of the object.\r\n"
 		"\t2: Whether the speed on the axis should be set according to the universe grid (when false) or according to the object's facing (when true); You almost always want to set this to true; (optional; defaults to false).\r\n" },
@@ -36686,43 +36686,48 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\t1:\tName of ship to check (evaluation returns NAN until ship is in-mission)." },
 
 	{ OP_DISTANCE, "Distance (Status operator)\r\n"
-		"\tReturns the distance between two objects.  These can be ships, wings, or waypoints.\r\n"
+		"\tReturns the distance between two objects.  These can be ships, wings, or waypoints.  "
+		"(Evaluation returns NAN until both objects are in-mission).\r\n"
 		"When a wing or team is given (for either argument), the result will be the closest distance.\r\n\r\n"
 		"NOTE: The standard retail SEXP measures between the center of one ship and the bounding box of another.  It is "
 		"recommended to use center-distance or bbox-distance.\r\n\r\n"
-		"Returns a numeric value.  Takes 2 arguments (evaluation returns NAN until both objects are in-mission)...\r\n"
+		"Returns a numeric value.  Takes 2 arguments...\r\n"
 		"\t1:\tThe name of one of the objects.\r\n"
 		"\t2:\tThe name of the other object."
 	},
 
 	{ OP_DISTANCE_CENTER, "Distance-To-Center (Status operator)\r\n"
-		"\tReturns the distance between the centers of two objects.  These can be ships, wings, or waypoints.\r\n"
+		"\tReturns the distance between the centers of two objects.  These can be ships, wings, or waypoints.  "
+		"(Evaluation returns NAN until both objects are in-mission).\r\n"
 		"When a wing or team is given (for either argument), the result will be the closest distance.\r\n\r\n"
-		"Returns a numeric value.  Takes 2 arguments (evaluation returns NAN until both objects are in-mission)...\r\n"
+		"Returns a numeric value.  Takes 2 arguments...\r\n"
 		"\t1:\tThe name of one of the objects.\r\n"
 		"\t2:\tThe name of the other object."
 	},
 
 	{ OP_DISTANCE_BBOX, "Distance-To-BBox (Status operator)\r\n"
-		"\tReturns the distance between the bounding boxes of two objects.  These can be ships, wings, or waypoints.\r\n"
+		"\tReturns the distance between the bounding boxes of two objects.  These can be ships, wings, or waypoints.  "
+		"(Evaluation returns NAN until both objects are in-mission).\r\n"
 		"When a wing or team is given (for either argument), the result will be the closest distance.\r\n\r\n"
-		"Returns a numeric value.  Takes 2 arguments (evaluation returns NAN until both objects are in-mission)...\r\n"
+		"Returns a numeric value.  Takes 2 arguments...\r\n"
 		"\t1:\tThe name of one of the objects.\r\n"
 		"\t2:\tThe name of the other object."
 	},
 
 	{ OP_DISTANCE_CENTER_SUBSYSTEM, "Center distance from ship subsystem (Status operator)\r\n"
-		"\tReturns the distance between the center of an object and the center of a ship subsystem.  The object can be a ship, wing, or waypoint.\r\n"
+		"\tReturns the distance between the center of an object and the center of a ship subsystem.  "
+		"The object can be a ship, wing, or waypoint. (Evaluation returns NAN until both objects are in-mission).\r\n"
 		"When a wing or team is given, the result will be the closest distance.\r\n\r\n"
-		"Returns a numeric value.  Takes 3 arguments (evaluation returns NAN until both objects are in-mission)...\r\n"
+		"Returns a numeric value.  Takes 3 arguments...\r\n"
 		"\t1:\tThe name of the object.\r\n"
 		"\t2:\tThe name of the ship which houses the subsystem.\r\n"
 		"\t3:\tThe name of the subsystem." },
 
 	{ OP_DISTANCE_BBOX_SUBSYSTEM, "BBox distance from ship subsystem (Status operator)\r\n"
-		"\tReturns the distance between the bounding box of an object and the center of a ship subsystem.  The object can be a ship, wing, or waypoint.\r\n"
+		"\tReturns the distance between the bounding box of an object and the center of a ship subsystem.  "
+		"The object can be a ship, wing, or waypoint.  (Evaluation returns NAN until both objects are in-mission).\r\n"
 		"When a wing or team is given, the result will be the closest distance.\r\n\r\n"
-		"Returns a numeric value.  Takes 3 arguments (evaluation returns NAN until both objects are in-mission)...\r\n"
+		"Returns a numeric value.  Takes 3 arguments...\r\n"
 		"\t1:\tThe name of the object.\r\n"
 		"\t2:\tThe name of the ship which houses the subsystem.\r\n"
 		"\t3:\tThe name of the subsystem." },
