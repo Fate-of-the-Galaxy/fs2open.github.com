@@ -38747,7 +38747,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\t5:\tY coordinate to fire from\r\n"
 		"\t6:\tZ coordinate to fire from\r\n"
 		"\t7:\tTarget ship (must be in-mission or \"" SEXP_NONE_STRING "\")\r\n"
-		"\t8:\tTarget subsystem (or \"" SEXP_NONE_STRING "\" if the first argument is not a ship - optional)\r\n"
+		"\t8:\tTarget subsystem (optional; can be \"" SEXP_NONE_STRING "\")\r\n"
 		"\t9:\tX coordinate to fire at (optional)\r\n"
 		"\t10:\tY coordinate to fire at (optional)\r\n"
 		"\t11:\tZ coordinate to fire at (optional)\r\n"
