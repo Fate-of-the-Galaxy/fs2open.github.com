@@ -36570,7 +36570,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\t1:\tName of ship we want to check." },
 
 	{ OP_TIME_SHIP_DEPARTED, "Time ship departed (Time operator)\r\n"
-		"\tReturns the time the specified ship departed the mission by warping out "
+		"\tReturns the time the specified ship departed the mission "
 		"(evaluation returns NAN until then).  Being destroyed doesn't count as departed.\r\n\r\n"
 		"Returns a numeric value.  Takes 1 argument...\r\n"
 		"\t1:\tName of ship we want to check." },
@@ -36578,7 +36578,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	{ OP_TIME_WING_DESTROYED, "Time wing destroyed (Time operator)\r\n"
 		"\tReturns the time the specified wing was destroyed.  All "
 		"ships in the wing have to have been destroyed (evaluation returns NAN until then). "
-		"If any have departed, the wing can never be considered destroyed. \r\n\r\n"
+		"If any have departed, the wing can never be considered destroyed.\r\n\r\n"
 		"Returns a numeric value.  Takes 1 argument...\r\n"
 		"\t1:\tName of wing we want to check." },
 
@@ -36588,9 +36588,8 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\t1:\tName of wing we want to check." },
 
 	{ OP_TIME_WING_DEPARTED, "Time wing departed (Time operator)\r\n"
-		"\tReturns the time the specified wing departed the mission by warping out.  All "
-		"ships in the wing have to have warped out (evaluation returns NAN until then). "
-		"If any are destroyed, the wing can never be considered departed.\r\n\r\n"
+		"\tReturns the time the specified wing departed the mission.  All "
+		"ships in the wing have to have departed (evaluation returns NAN until then).\r\n\r\n"
 		"Returns a numeric value.  Takes 1 argument...\r\n"
 		"\t1:\tName of wing we want to check." },
 
@@ -36716,7 +36715,7 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 
 	{ OP_DISTANCE_CENTER_SUBSYSTEM, "Center distance from ship subsystem (Status operator)\r\n"
 		"\tReturns the distance between the center of an object and the center of a ship subsystem.  "
-		"The object can be a ship, wing, or waypoint. (Evaluation returns NAN until both objects are in-mission).\r\n"
+		"The object can be a ship, wing, or waypoint.  (Evaluation returns NAN until both objects are in-mission).\r\n"
 		"When a wing or team is given, the result will be the closest distance.\r\n\r\n"
 		"Returns a numeric value.  Takes 3 arguments...\r\n"
 		"\t1:\tThe name of the object.\r\n"
@@ -38742,13 +38741,13 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	{ OP_BEAM_FLOATING_FIRE, "beam-create\r\n"
 		"\tFire a beam weapon from the specified coordinates to the specified target. Not compatible with multiplayer.\r\n"
 		"\t1:\tBeam weapon to fire\r\n"
-		"\t2:\tParent ship (optional; for kill credit, if applicable, must be in-mission)\r\n"
+		"\t2:\tParent ship (for kill credit, if applicable, must be in-mission; can be 'none')\r\n"
 		"\t3:\tTeam for this beam to be on (related to difficulty-based damage)\r\n"
 		"\t4:\tX coordinate to fire from\r\n"
 		"\t5:\tY coordinate to fire from\r\n"
 		"\t6:\tZ coordinate to fire from\r\n"
 		"\t7:\tTarget ship (optional; must be in-mission)\r\n"
-		"\t8:\tTarget subsystem (optional)\r\n"
+		"\t8:\tTarget subsystem (optional; can be 'none')\r\n"
 		"\t9:\tX coordinate to fire at (optional)\r\n"
 		"\t10:\tY coordinate to fire at (optional)\r\n"
 		"\t11:\tZ coordinate to fire at (optional)\r\n"
