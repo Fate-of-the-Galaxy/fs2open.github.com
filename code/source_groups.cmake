@@ -836,6 +836,16 @@ add_file_folder("Mission"
 	mission/mission_flags.h
 )
 
+# Mission Import files - specific to FotG
+add_file_folder("Mission\\\\Import"
+	mission/import/xwingbrflib.cpp
+	mission/import/xwingbrflib.h
+	mission/import/xwinglib.cpp
+	mission/import/xwinglib.h
+	mission/import/xwingmissionparse.cpp
+	mission/import/xwingmissionparse.h
+)
+
 # MissionEditor file
 add_file_folder("MissionEditor"
 	missioneditor/common.cpp
