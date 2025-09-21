@@ -910,7 +910,7 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 	}
 }	
 
-void post_parse_arrival_departure_anchor(const char *source_name, int &anchor, bool via_hangar)
+void post_parse_arrival_departure_anchor(const char *source_name, int &anchor)
 {
 	if (anchor < 0)
 		return;
@@ -942,27 +942,33 @@ void post_parse_arrival_departure_anchor(const char *source_name, int &anchor, b
 			return;
 		}
 	}
+}
 
-	// now we have a valid anchor, so see if it's valid for arrival/departure
-	if (via_hangar)
+void post_parse_remove_invalid_anchor_index(int invalid_anchor)
+{
+	// 1) make sure nothing actually refers to this anchor
+	// 2) since this anchor will be removed, all subsequent anchors need to be reduced by 1
+	for (auto &pobj : Parse_objects)
 	{
-		auto pobj_index = find_item_with_string(Parse_objects, &p_object::name, anchor_name);
-		Assert(pobj_index >= 0);
-		auto &si = Ship_info[Parse_objects[pobj_index].ship_class];
+		Assertion(pobj.arrival_anchor != invalid_anchor, "Arrival anchor of parse object %s refers to invalid parse name index %d", pobj.name, invalid_anchor);
+		Assertion(pobj.departure_anchor != invalid_anchor, "Departure anchor of parse object %s refers to invalid parse name index %d", pobj.name, invalid_anchor);
 
-		// the model might not be loaded yet, so load it explicitly here
-		if (si.model_num < 0)
-		{
-			if (VALID_FNAME(si.pof_file))
-				si.model_num = model_load(si.pof_file, &si);
-		}
-		if (si.model_num >= 0)
-		{
-			auto pm = model_get(si.model_num);
-			Assert(pm);
-			if (!pm->ship_bay || pm->ship_bay->num_paths <= 0)
-				Warning(LOCATION, "%s uses %s (%s) as an arrival/departure mothership, but %s does not have a hangar bay!", source_name, anchor_name, si.name, anchor_name);
-		}
+		if (pobj.arrival_anchor > invalid_anchor)
+			--pobj.arrival_anchor;
+		if (pobj.departure_anchor > invalid_anchor)
+			--pobj.departure_anchor;
+	}
+	for (int wingnum = 0; wingnum < Num_wings; ++wingnum)
+	{
+		auto &w = Wings[wingnum];
+
+		Assertion(w.arrival_anchor != invalid_anchor, "Arrival anchor of wing %s refers to invalid parse name index %d", w.name, invalid_anchor);
+		Assertion(w.departure_anchor != invalid_anchor, "Departure anchor of wing %s refers to invalid parse name index %d", w.name, invalid_anchor);
+
+		if (w.arrival_anchor > invalid_anchor)
+			--w.arrival_anchor;
+		if (w.departure_anchor > invalid_anchor)
+			--w.departure_anchor;
 	}
 }
 
@@ -1037,14 +1043,33 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 	// post_parse stuff
 	for (auto &pobj : Parse_objects)
 	{
-		post_parse_arrival_departure_anchor(pobj.name, pobj.arrival_anchor, pobj.arrival_location == ArrivalLocation::FROM_DOCK_BAY);
-		post_parse_arrival_departure_anchor(pobj.name, pobj.departure_anchor, pobj.departure_location == DepartureLocation::TO_DOCK_BAY);
+		post_parse_arrival_departure_anchor(pobj.name, pobj.arrival_anchor);
+		post_parse_arrival_departure_anchor(pobj.name, pobj.departure_anchor);
 	}
 	for (int wingnum = 0; wingnum < Num_wings; ++wingnum)
 	{
 		auto &w = Wings[wingnum];
-		post_parse_arrival_departure_anchor(w.name, w.arrival_anchor, w.arrival_location == ArrivalLocation::FROM_DOCK_BAY);
-		post_parse_arrival_departure_anchor(w.name, w.departure_anchor, w.departure_location == DepartureLocation::TO_DOCK_BAY);
+		post_parse_arrival_departure_anchor(w.name, w.arrival_anchor);
+		post_parse_arrival_departure_anchor(w.name, w.departure_anchor);
+	}
+
+	// now remove the invalid anchors so they don't cause warnings in post-processing
+	for (auto it = Parse_names.begin(); it != Parse_names.end(); )
+	{
+		auto anchor_name = it->c_str();
+		auto wingnum = wing_name_lookup(anchor_name);
+
+		// parse names referring to wings are invalid
+		if (wingnum >= 0)
+		{
+			int invalid_anchor = std::distance(Parse_names.begin(), it);
+			post_parse_remove_invalid_anchor_index(invalid_anchor);
+
+			Parse_names.erase(it);
+			it = Parse_names.begin();	// start over from the beginning
+		}
+		else
+			++it;	// iterate as normal
 	}
 }
 
