@@ -910,6 +910,62 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 	}
 }	
 
+void post_parse_arrival_departure_anchor(const char *source_name, int &anchor, bool via_hangar)
+{
+	if (anchor < 0)
+		return;
+	auto anchor_name = Parse_names[anchor].c_str();
+
+	// a bit of an edge case... if an arrival or departure anchor is a wing, not a ship,
+	// then change it to the first ship in that wing
+	auto wingnum = wing_name_lookup(anchor_name);
+	if (wingnum >= 0)
+	{
+		auto wingp = &Wings[wingnum];
+
+		// since at this point we only have parse objects, find the first parse object that belongs to this wing
+		bool found = false;
+		for (const auto& pobj : Parse_objects)
+		{
+			if (pobj.wingnum == wingnum)
+			{
+				anchor = get_parse_name_index(pobj.name);
+				anchor_name = pobj.name;
+				found = true;
+				break;
+			}
+		}
+
+		if (!found)
+		{
+			Warning(LOCATION, "Unable to find a ship corresponding to wing %s!", wingp->name);
+			return;
+		}
+	}
+
+	// now we have a valid anchor, so see if it's valid for arrival/departure
+	if (via_hangar)
+	{
+		auto pobj_index = find_item_with_string(Parse_objects, &p_object::name, anchor_name);
+		Assert(pobj_index >= 0);
+		auto &si = Ship_info[Parse_objects[pobj_index].ship_class];
+
+		// the model might not be loaded yet, so load it explicitly here
+		if (si.model_num < 0)
+		{
+			if (VALID_FNAME(si.pof_file))
+				si.model_num = model_load(si.pof_file, &si);
+		}
+		if (si.model_num >= 0)
+		{
+			auto pm = model_get(si.model_num);
+			Assert(pm);
+			if (!pm->ship_bay || pm->ship_bay->num_paths <= 0)
+				Warning(LOCATION, "%s uses %s (%s) as an arrival/departure mothership, but %s does not have a hangar bay!", source_name, anchor_name, si.name, anchor_name);
+		}
+	}
+}
+
 void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 {
 	int index = -1;
@@ -976,7 +1032,20 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 	// load object groups
 	int object_count = 0;
 	for (const auto& obj : xwim->objects) 
-		parse_xwi_objectgroup(pm, xwim, &obj, object_count); 
+		parse_xwi_objectgroup(pm, xwim, &obj, object_count);
+
+	// post_parse stuff
+	for (auto &pobj : Parse_objects)
+	{
+		post_parse_arrival_departure_anchor(pobj.name, pobj.arrival_anchor, pobj.arrival_location == ArrivalLocation::FROM_DOCK_BAY);
+		post_parse_arrival_departure_anchor(pobj.name, pobj.departure_anchor, pobj.departure_location == DepartureLocation::TO_DOCK_BAY);
+	}
+	for (int wingnum = 0; wingnum < Num_wings; ++wingnum)
+	{
+		auto &w = Wings[wingnum];
+		post_parse_arrival_departure_anchor(w.name, w.arrival_anchor, w.arrival_location == ArrivalLocation::FROM_DOCK_BAY);
+		post_parse_arrival_departure_anchor(w.name, w.departure_anchor, w.departure_location == DepartureLocation::TO_DOCK_BAY);
+	}
 }
 
 void post_process_xwi_mission(mission *pm, const XWingMission *xwim)
