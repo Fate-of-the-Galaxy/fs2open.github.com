@@ -386,15 +386,15 @@ const char *xwi_determine_ai_class(const XWMFlightGroup *fg)
 	switch (fg->craftAI)
 	{
 		case XWMCraftAI::ai_Rookie:
-			return "Cadet";
+			return "AI_04_Cadet";
 		case XWMCraftAI::ai_Officer:
-			return "Officer";
+			return "AI_05_Officer";
 		case XWMCraftAI::ai_Veteran:
-			return "Captain";
+			return "AI_07_Captain";
 		case XWMCraftAI::ai_Ace:
-			return "Commander";
+			return "AI_09_Commander";
 		case XWMCraftAI::ai_Top_Ace:
-			return "General";
+			return "AI_11_General";
 	}
 
 	return nullptr;
