@@ -17,6 +17,7 @@
 extern int allocate_subsys_status();
 
 static int Player_flight_group = 0;
+static SCP_unordered_set<SCP_string, SCP_string_lcase_hash, SCP_string_lcase_equal_to> Do_not_reposition_wings;
 
 const int MAX_SPACE_OBJECTS = 64; // To match the XWing game engine limit
 
@@ -1007,6 +1008,114 @@ void post_parse_validate_anchors()
 	}
 }
 
+// X-Wing has at least one mission with multiple flight groups named Red 1, Red 2, etc.
+void post_parse_consolidate_similar_wings()
+{
+	// first consolidate the wings
+	for (int wingnum = 0; wingnum < Num_wings; ++wingnum)
+	{
+		auto wingp = &Wings[wingnum];
+		if (wingp->wave_count > 1)
+			continue;
+		bool merged = false;
+
+		// see if this is one of the wings that starts with a number
+		auto suffix_ptr = strstr(wingp->name, " 1");
+		auto suffix_pos = suffix_ptr ? static_cast<int>(suffix_ptr - wingp->name) : -1;
+		if (suffix_pos == strlen(wingp->name) - 2)
+		{
+			// find this parse object
+			int leader_pobj_index = find_item_with_field(Parse_objects, &p_object::wingnum, wingnum);
+			Assertion(leader_pobj_index >= 0, "The parse object corresponding to wing %s must exist!", wingp->name);
+			auto &leader_pobj = Parse_objects[leader_pobj_index];
+
+			// fix the ship name
+			if (!strcmp(Player_start_shipname, leader_pobj.name))
+				strcpy_s(Player_start_shipname, wingp->name);
+			strcpy_s(leader_pobj.name, wingp->name);
+
+			// fix the wing name
+			for (auto ptr : Starting_wing_names)
+				if (!strcmp(ptr, wingp->name))
+					ptr[suffix_pos] = '\0';
+			for (auto ptr : Squadron_wing_names)
+				if (!strcmp(ptr, wingp->name))
+					ptr[suffix_pos] = '\0';
+			for (auto ptr : TVT_wing_names)
+				if (!strcmp(ptr, wingp->name))
+					ptr[suffix_pos] = '\0';
+			wingp->name[suffix_pos] = '\0';
+
+			// look for other wings in increasing order
+			for (int ship_index = 2; ship_index <= MAX_SHIPS_PER_WING; ++ship_index)
+			{
+				char other_wing_name[NAME_LENGTH];
+				sprintf(other_wing_name, NOX("%s %d"), wingp->name, ship_index);
+				int other_wingnum = find_item_with_string(Wings, Num_wings, &wing::name, other_wing_name);
+
+				// discontinue the sequence if it ends early, or there is a gap, or the other wing has multiple ships
+				if (other_wingnum < 0)
+					break;
+				auto other_wingp = &Wings[other_wingnum];
+				if (other_wingp->wave_count > 1)
+					break;
+
+				// find this parse object
+				int pobj_index = find_item_with_field(Parse_objects, &p_object::wingnum, other_wingnum);
+				Assertion(pobj_index >= 0, "The parse object corresponding to wing %s must exist!", other_wingp->name);
+				auto &pobj = Parse_objects[pobj_index];
+
+				// fix the ship name
+				if (!strcmp(Player_start_shipname, pobj.name))
+					strcpy_s(Player_start_shipname, other_wing_name);
+				strcpy_s(pobj.name, other_wing_name);
+
+				// clear the other wing's name since we'll delete it
+				*other_wingp->name = '\0';
+
+				// merge this ship into the first wing...
+				pobj.wingnum = wingnum;
+				pobj.pos_in_wing = ship_index - 1;
+				++wingp->wave_count;
+
+				merged = true;
+			}
+		}
+
+		if (merged)
+		{
+			Do_not_reposition_wings.insert(wingp->name);
+			Warning(LOCATION, "Wing %s was consolidated from multiple source wings.  Please use the original X-Wing mission to verify that the new wing is correct.", wingp->name);
+		}
+	}
+
+	// and now delete any leftover wings
+	for (int wingnum = 0; wingnum < Num_wings; ++wingnum)
+	{
+		// a leftover wing is one that is in range but has a blank name
+		auto leftover_wingp = &Wings[wingnum];
+		if (*leftover_wingp->name != '\0')
+			continue;
+
+		free_sexp2(leftover_wingp->arrival_cue);
+		free_sexp2(leftover_wingp->departure_cue);
+
+		for (int i = wingnum + 1; i < Num_wings; ++i)
+			Wings[i-1] = std::move(Wings[i]);
+
+		Wings[Num_wings-1].clear();
+		--Num_wings;
+
+		// any wing references higher than this wing should be adjusted
+		for (auto &pobj : Parse_objects)
+		{
+			Assertion(pobj.wingnum != wingnum, "There should not be any more references to leftover wing %d!", wingnum);
+			if (pobj.wingnum > wingnum)
+				--pobj.wingnum;
+		}
+	}
+}
+
 void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 {
 	int index = -1;
@@ -1028,6 +1137,8 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 		Warning(LOCATION, "Player flight group not found?");
 		Player_flight_group = 0;
 	}
+
+	Do_not_reposition_wings.clear();
 
 	// clear out wings by default
 	for (int i = 0; i < MAX_STARTING_WINGS; i++)
@@ -1077,6 +1188,7 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 
 	// post_parse stuff
 	post_parse_validate_anchors();
+	post_parse_consolidate_similar_wings();
 }
 
 void post_process_xwi_mission(mission *pm, const XWingMission *xwim)
@@ -1089,13 +1201,17 @@ void post_process_xwi_mission(mission *pm, const XWingMission *xwim)
 		auto wingp = &Wings[wingnum];
 		auto leader_objp = &Objects[Ships[wingp->ship_index[0]].objnum];
 
-		// we need to arrange all the flight groups into their formations, but this can't be done until the FRED objects are created from the parse objects
-		for (int i = 1; i < wingp->wave_count; i++)
+		// don't reposition flight groups that have been consolidated
+		if (!Do_not_reposition_wings.contains(wingp->name))
 		{
-			auto objp = &Objects[Ships[wingp->ship_index[i]].objnum];
+			// we need to arrange all the flight groups into their formations, but this can't be done until the FRED objects are created from the parse objects
+			for (int i = 1; i < wingp->wave_count; i++)
+			{
+				auto objp = &Objects[Ships[wingp->ship_index[i]].objnum];
 
-			get_absolute_wing_pos(&objp->pos, leader_objp, wingnum, i, false);
-			objp->orient = leader_objp->orient;
+				get_absolute_wing_pos(&objp->pos, leader_objp, wingnum, i, false);
+				objp->orient = leader_objp->orient;
+			}
 		}
 
 		// set the hotkeys for the starting wings
