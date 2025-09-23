@@ -910,6 +910,68 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 	}
 }	
 
+void post_parse_arrival_departure_anchor(const char *source_name, int &anchor)
+{
+	if (anchor < 0)
+		return;
+	auto anchor_name = Parse_names[anchor].c_str();
+
+	// a bit of an edge case... if an arrival or departure anchor is a wing, not a ship,
+	// then change it to the first ship in that wing
+	auto wingnum = wing_name_lookup(anchor_name);
+	if (wingnum >= 0)
+	{
+		auto wingp = &Wings[wingnum];
+
+		// since at this point we only have parse objects, find the first parse object that belongs to this wing
+		bool found = false;
+		for (const auto& pobj : Parse_objects)
+		{
+			if (pobj.wingnum == wingnum)
+			{
+				anchor = get_parse_name_index(pobj.name);
+				anchor_name = pobj.name;
+				found = true;
+				break;
+			}
+		}
+
+		if (!found)
+		{
+			Warning(LOCATION, "Unable to find a ship corresponding to wing %s!", wingp->name);
+			return;
+		}
+	}
+}
+
+void post_parse_remove_invalid_anchor_index(int invalid_anchor)
+{
+	// 1) make sure nothing actually refers to this anchor
+	// 2) since this anchor will be removed, all subsequent anchors need to be reduced by 1
+	for (auto &pobj : Parse_objects)
+	{
+		Assertion(pobj.arrival_anchor != invalid_anchor, "Arrival anchor of parse object %s refers to invalid parse name index %d", pobj.name, invalid_anchor);
+		Assertion(pobj.departure_anchor != invalid_anchor, "Departure anchor of parse object %s refers to invalid parse name index %d", pobj.name, invalid_anchor);
+
+		if (pobj.arrival_anchor > invalid_anchor)
+			--pobj.arrival_anchor;
+		if (pobj.departure_anchor > invalid_anchor)
+			--pobj.departure_anchor;
+	}
+	for (int wingnum = 0; wingnum < Num_wings; ++wingnum)
+	{
+		auto &w = Wings[wingnum];
+
+		Assertion(w.arrival_anchor != invalid_anchor, "Arrival anchor of wing %s refers to invalid parse name index %d", w.name, invalid_anchor);
+		Assertion(w.departure_anchor != invalid_anchor, "Departure anchor of wing %s refers to invalid parse name index %d", w.name, invalid_anchor);
+
+		if (w.arrival_anchor > invalid_anchor)
+			--w.arrival_anchor;
+		if (w.departure_anchor > invalid_anchor)
+			--w.departure_anchor;
+	}
+}
+
 void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 {
 	int index = -1;
@@ -976,7 +1038,39 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 	// load object groups
 	int object_count = 0;
 	for (const auto& obj : xwim->objects) 
-		parse_xwi_objectgroup(pm, xwim, &obj, object_count); 
+		parse_xwi_objectgroup(pm, xwim, &obj, object_count);
+
+	// post_parse stuff
+	for (auto &pobj : Parse_objects)
+	{
+		post_parse_arrival_departure_anchor(pobj.name, pobj.arrival_anchor);
+		post_parse_arrival_departure_anchor(pobj.name, pobj.departure_anchor);
+	}
+	for (int wingnum = 0; wingnum < Num_wings; ++wingnum)
+	{
+		auto &w = Wings[wingnum];
+		post_parse_arrival_departure_anchor(w.name, w.arrival_anchor);
+		post_parse_arrival_departure_anchor(w.name, w.departure_anchor);
+	}
+
+	// now remove the invalid anchors so they don't cause warnings in post-processing
+	for (auto it = Parse_names.begin(); it != Parse_names.end(); )
+	{
+		auto anchor_name = it->c_str();
+		auto wingnum = wing_name_lookup(anchor_name);
+
+		// parse names referring to wings are invalid
+		if (wingnum >= 0)
+		{
+			int invalid_anchor = std::distance(Parse_names.begin(), it);
+			post_parse_remove_invalid_anchor_index(invalid_anchor);
+
+			Parse_names.erase(it);
+			it = Parse_names.begin();	// start over from the beginning
+		}
+		else
+			++it;	// iterate as normal
+	}
 }
 
 void post_process_xwi_mission(mission *pm, const XWingMission *xwim)
