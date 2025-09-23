@@ -996,7 +996,7 @@ void post_parse_validate_anchors()
 		// parse names referring to wings are invalid
 		if (wingnum >= 0)
 		{
-			int invalid_anchor = std::distance(Parse_names.begin(), it);
+			int invalid_anchor = static_cast<int>(std::distance(Parse_names.begin(), it));
 			post_parse_remove_invalid_anchor_index(invalid_anchor);
 
 			Parse_names.erase(it);
