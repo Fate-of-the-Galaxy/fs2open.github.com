@@ -354,7 +354,7 @@ const char* xwi_determine_default_team(const XWMFlightGroup* fg)
 		break;
 	}
 
-	return 0;
+	return nullptr;
 }
 
 const char *xwi_determine_team(const XWingMission *xwim, const XWMFlightGroup *fg, const ship_info *sip)
