@@ -330,26 +330,38 @@ const char *xwi_determine_team(const XWingMission *xwim, const XWMFlightGroup *f
 {
 	SCP_UNUSED(sip);
 
-	auto player_iff = xwim->flightgroups[Player_flight_group].craftIFF;
-
 	if (fg->craftIFF == XWMCraftIFF::iff_imperial)
-	{
-		if (player_iff == XWMCraftIFF::iff_imperial)
-			return "Friendly";
-		if (player_iff == XWMCraftIFF::iff_rebel)
 			return "Hostile";
-	}
-
 	if (fg->craftIFF == XWMCraftIFF::iff_rebel)
-	{
-		if (player_iff == XWMCraftIFF::iff_imperial)
-			return "Hostile";
-		if (player_iff == XWMCraftIFF::iff_rebel)
 			return "Friendly";
-	}
-
 	if (fg->craftIFF == XWMCraftIFF::iff_neutral)
 		return "Civilian";
+
+	switch (fg->flightGroupType) {
+		case XWMFlightGroupType::fg_X_Wing:
+		case XWMFlightGroupType::fg_Y_Wing:
+		case XWMFlightGroupType::fg_A_Wing:
+		case XWMFlightGroupType::fg_B_Wing:
+		case XWMFlightGroupType::fg_Calamari_Cruiser:
+		case XWMFlightGroupType::fg_Nebulon_B_Frigate:
+			return "Friendly";
+		case XWMFlightGroupType::fg_TIE_Fighter:
+		case XWMFlightGroupType::fg_TIE_Interceptor:
+		case XWMFlightGroupType::fg_TIE_Bomber:
+		case XWMFlightGroupType::fg_Gunboat:
+		case XWMFlightGroupType::fg_Imperial_Star_Destroyer:
+		case XWMFlightGroupType::fg_TIE_Advanced:
+		case XWMFlightGroupType::fg_Transport:
+			return "Hostile";
+		case XWMFlightGroupType::fg_Shuttle:
+		case XWMFlightGroupType::fg_Tug:
+		case XWMFlightGroupType::fg_Container:
+		case XWMFlightGroupType::fg_Freighter:
+		case XWMFlightGroupType::fg_Corellian_Corvette:
+			return "Civilian";
+		default:
+			break;
+	}
 
 	return nullptr;
 }
