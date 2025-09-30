@@ -1020,33 +1020,68 @@ void post_parse_validate_anchors()
 	}
 }
 
+bool extract_stem_and_number(const char *name, char *stem, int *num)
+{
+	Assertion(name && stem && num, "Arguments must be non-null!");
+
+	auto ch = strrchr(name, ' ');
+	if (!ch)
+		return false;
+	if (!can_construe_as_integer(ch + 1))
+		return false;
+
+	int len = static_cast<int>(ch - name);
+	strncpy(stem, name, len);
+	stem[len] = '\0';
+
+	*num = atoi(ch + 1);
+	return true;
+}
+
 // X-Wing has at least one mission with multiple flight groups named Red 1, Red 2, etc.
 void post_parse_consolidate_similar_wings()
 {
+	char stem[NAME_LENGTH];
+	int ship_index;
+	SCP_unordered_set<SCP_string, SCP_string_lcase_hash, SCP_string_lcase_equal_to> consolidated_wings;
+
 	// first consolidate the wings
 	for (int wingnum = 0; wingnum < Num_wings; ++wingnum)
 	{
 		auto wingp = &Wings[wingnum];
 		if (wingp->wave_count > 1)
 			continue;
-		bool merged = false;
 
-		// see if this is one of the wings that starts with a number
-		auto suffix_ptr = strstr(wingp->name, " 1");
-		auto suffix_pos = suffix_ptr ? static_cast<int>(suffix_ptr - wingp->name) : -1;
-		if (suffix_pos == strlen(wingp->name) - 2)
+		// see if this is one of the wings that includes a number
+		if (!extract_stem_and_number(wingp->name, stem, &ship_index))
+			continue;
+
+		int stem_wingnum = find_item_with_string(Wings, Num_wings, &wing::name, stem);
+		auto suffix_pos = strlen(stem);
+
+		// for wings that are the stem and 1, just change the wing names
+		if (ship_index == 1)
 		{
+			if (stem_wingnum >= 0)
+			{
+				Warning(LOCATION, "Cannot rename %s to %s; stem wing already exists!", wingp->name, stem);
+				continue;
+			}
+
 			// find this parse object
 			int leader_pobj_index = find_item_with_field(Parse_objects, &p_object::wingnum, wingnum);
 			Assertion(leader_pobj_index >= 0, "The parse object corresponding to wing %s must exist!", wingp->name);
 			auto &leader_pobj = Parse_objects[leader_pobj_index];
 
-			// fix the ship name
+			// fix this ship's name
 			if (!strcmp(Player_start_shipname, leader_pobj.name))
 				strcpy_s(Player_start_shipname, wingp->name);
+			int parse_index = string_lookup(leader_pobj.name, Parse_names);
 			strcpy_s(leader_pobj.name, wingp->name);
+			if (parse_index >= 0)
+				Parse_names[parse_index] = leader_pobj.name;
 
-			// fix the wing name
+			// fix wing name references
 			for (auto ptr : Starting_wing_names)
 				if (!strcmp(ptr, wingp->name))
 					ptr[suffix_pos] = '\0';
@@ -1056,49 +1091,74 @@ void post_parse_consolidate_similar_wings()
 			for (auto ptr : TVT_wing_names)
 				if (!strcmp(ptr, wingp->name))
 					ptr[suffix_pos] = '\0';
+
+			// fix this wing's name
 			wingp->name[suffix_pos] = '\0';
 
-			// look for other wings in increasing order
-			for (int ship_index = 2; ship_index <= MAX_SHIPS_PER_WING; ++ship_index)
-			{
-				char other_wing_name[NAME_LENGTH];
-				sprintf(other_wing_name, NOX("%s %d"), wingp->name, ship_index);
-				int other_wingnum = find_item_with_string(Wings, Num_wings, &wing::name, other_wing_name);
-
-				// discontinue the sequence if it ends early, or there is a gap, or the other wing has multiple ships
-				if (other_wingnum < 0)
-					break;
-				auto other_wingp = &Wings[other_wingnum];
-				if (other_wingp->wave_count > 1)
-					break;
-
-				// find this parse object
-				int pobj_index = find_item_with_field(Parse_objects, &p_object::wingnum, other_wingnum);
-				Assertion(pobj_index >= 0, "The parse object corresponding to wing %s must exist!", other_wingp->name);
-				auto &pobj = Parse_objects[pobj_index];
-
-				// fix the ship name
-				if (!strcmp(Player_start_shipname, pobj.name))
-					strcpy_s(Player_start_shipname, other_wing_name);
-				strcpy_s(pobj.name, other_wing_name);
-
-				// clear the other wing's name since we'll delete it
-				*other_wingp->name = '\0';
-
-				// merge this ship into the first wing...
-				pobj.wingnum = wingnum;
-				pobj.pos_in_wing = ship_index - 1;
-				++wingp->wave_count;
-
-				merged = true;
-			}
+			// start back at the beginning
+			wingnum = -1;
+			continue;
 		}
 
-		if (merged)
+		// to merge a wing, the stem wing must exist at this point
+		if (stem_wingnum < 0)
+			continue;
+		auto stem_wingp = &Wings[stem_wingnum];
+
+		// for wings that are the next available number from an existing wing, merge them
+		if ((ship_index == stem_wingp->wave_count + 1) && (ship_index <= MAX_SHIPS_PER_WING))
 		{
-			Do_not_reposition_wings.insert(wingp->name);
-			Warning(LOCATION, "Wing %s was consolidated from multiple source wings.  Please use the original X-Wing mission to verify that the new wing is correct.", wingp->name);
+			// find this parse object
+			int pobj_index = find_item_with_field(Parse_objects, &p_object::wingnum, wingnum);
+			Assertion(pobj_index >= 0, "The parse object corresponding to wing %s must exist!", wingp->name);
+			auto &pobj = Parse_objects[pobj_index];
+
+			// fix this ship's name
+			if (!strcmp(Player_start_shipname, pobj.name))
+				sprintf(Player_start_shipname, "%s %d", stem, ship_index);
+			int parse_index = string_lookup(pobj.name, Parse_names);
+			sprintf(pobj.name, "%s %d", stem, ship_index);
+			if (parse_index >= 0)
+				Parse_names[parse_index] = pobj.name;
+
+			// fix wing name references
+			for (auto ptr : Starting_wing_names)
+				if (!strcmp(ptr, wingp->name))
+					ptr[suffix_pos] = '\0';
+			for (auto ptr : Squadron_wing_names)
+				if (!strcmp(ptr, wingp->name))
+					ptr[suffix_pos] = '\0';
+			for (auto ptr : TVT_wing_names)
+				if (!strcmp(ptr, wingp->name))
+					ptr[suffix_pos] = '\0';
+
+			// clear this wing's name since we'll delete it
+			*wingp->name = '\0';
+
+			// merge this ship into the stem wing...
+			pobj.wingnum = stem_wingnum;
+			pobj.pos_in_wing = ship_index - 1;
+			++stem_wingp->wave_count;
+			consolidated_wings.insert(stem);
+
+			// start back at the beginning
+			wingnum = -1;
+			continue;
 		}
+	}
+
+	if (!consolidated_wings.empty())
+	{
+		Do_not_reposition_wings.insert(consolidated_wings.begin(), consolidated_wings.end());
+
+		SCP_string msg = "The following wings were consolidated from multiple source wings.  Please use the original X-Wing mission to verify that the new wings are correct.";
+		for (const auto& name : consolidated_wings)
+		{
+			msg.append("\n\t");
+			msg.append(name);
+		}
+
+		Warning(LOCATION, "%s", msg.c_str());
 	}
 
 	// and now delete any leftover wings
