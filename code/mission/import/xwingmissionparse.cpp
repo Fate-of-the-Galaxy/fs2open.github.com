@@ -1188,6 +1188,60 @@ void post_parse_consolidate_similar_wings()
 	}
 }
 
+// check to see if any wings have identical names!
+void post_parse_disambiguate_wings()
+{
+	for (int i = 0; i < Num_wings; ++i)
+	{
+		int index = 1;
+
+		for (auto j = i + 1; j < Num_wings; ++j)
+		{
+			if (!stricmp(Wings[i].name, Wings[j].name))
+			{
+				// disambiguate the later name
+				sprintf(Wings[j].name, "%s#%d", Wings[i].name, index++);
+
+				// disambiguate all the wingmen
+				for (auto &pobj : Parse_objects)
+				{
+					if (pobj.wingnum == j)
+					{
+						bool needs_display_name;
+						wing_bash_ship_name(pobj.name, Wings[j].name, pobj.pos_in_wing + 1, &needs_display_name);
+
+						// set up display name if we need to
+						if (needs_display_name)
+						{
+							pobj.display_name = pobj.name;
+							end_string_at_first_hash_symbol(pobj.display_name);
+							pobj.flags.set(Mission::Parse_Object_Flags::SF_Has_display_name);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// likewise for ships
+void post_parse_disambiguate_ships()
+{
+	for (auto ii = Parse_objects.begin(); ii != Parse_objects.end(); ++ii)
+	{
+		int index = 1;
+
+		for (auto jj = ii + 1; jj != Parse_objects.end(); ++jj)
+		{
+			if (!stricmp(ii->name, jj->name))
+			{
+				// disambiguate the later name
+				sprintf(jj->name, "%s#%d", ii->name, index++);
+			}
+		}
+	}
+}
+
 void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 {
 	int index = -1;
@@ -1258,9 +1312,13 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 	for (const auto& obj : xwim->objects) 
 		parse_xwi_objectgroup(pm, xwim, &obj, object_count);
 
-	// post_parse stuff
+	// post-parse stuff
 	post_parse_validate_anchors();
 	post_parse_consolidate_similar_wings();
+
+	// X-Wing can have identically named ships and wings, but FSO can't
+	post_parse_disambiguate_wings();
+	post_parse_disambiguate_ships();
 }
 
 void post_process_xwi_mission(mission *pm, const XWingMission *xwim)
