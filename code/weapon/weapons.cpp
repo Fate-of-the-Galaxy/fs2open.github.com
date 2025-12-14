@@ -368,16 +368,6 @@ void missle_obj_list_remove(int index)
 }
 
 /**
- * Called externally to generate an address from an index into
- * the Missile_objs[] array
- */
-missile_obj *missile_obj_return_address(int index)
-{
-	Assert(index >= 0 && index < MAX_MISSILE_OBJS);
-	return &Missile_objs[index];
-}
-
-/**
  * Return the index of Weapon_info[].name that is *name.
  */
 int weapon_info_lookup(const char *name)
@@ -1075,7 +1065,7 @@ int parse_weapon(int subtype, bool replace, const char *filename)
 		stuff_int(&wip->hud_target_lod);
 
 	if(optional_string("$Detail distance:")) {
-		wip->num_detail_levels = (int)stuff_int_list(wip->detail_distance, MAX_MODEL_DETAIL_LEVELS, RAW_INTEGER_TYPE);
+		wip->num_detail_levels = sz2i(stuff_int_list(wip->detail_distance, MAX_MODEL_DETAIL_LEVELS, ParseLookupType::RAW_INTEGER_TYPE));
 	}
 
 	if ( optional_string("$External Model File:") )

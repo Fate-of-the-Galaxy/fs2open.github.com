@@ -869,12 +869,12 @@ SCP_vector<sexp_oper> Operators = {
 	{ "ai-waypoints-once",				OP_AI_WAYPOINTS_ONCE,					2,	5,			SEXP_GOAL_OPERATOR,	},
 	{ "ai-ignore",						OP_AI_IGNORE,							2,	2,			SEXP_GOAL_OPERATOR,	},
 	{ "ai-ignore-new",					OP_AI_IGNORE_NEW,						2,	2,			SEXP_GOAL_OPERATOR,	},
-	{ "ai-form-on-wing",				OP_AI_FORM_ON_WING,						1,	1,			SEXP_GOAL_OPERATOR, },
+	{ "ai-form-on-wing",				OP_AI_FORM_ON_WING,						1,	5,			SEXP_GOAL_OPERATOR, },
 	{ "ai-fly-to-ship",					OP_AI_FLY_TO_SHIP,						2,	5,			SEXP_GOAL_OPERATOR, },
 	{ "ai-stay-near-ship",				OP_AI_STAY_NEAR_SHIP,					2,	5,			SEXP_GOAL_OPERATOR,	},
 	{ "ai-evade-ship",					OP_AI_EVADE_SHIP,						2,	2,			SEXP_GOAL_OPERATOR,	},
 	{ "ai-keep-safe-distance",			OP_AI_KEEP_SAFE_DISTANCE,				1,	1,			SEXP_GOAL_OPERATOR,	},
-	{ "ai-stay-still",					OP_AI_STAY_STILL,						2,	2,			SEXP_GOAL_OPERATOR,	},
+	{ "ai-stay-still",					OP_AI_STAY_STILL,						2,	3,			SEXP_GOAL_OPERATOR,	},
 	{ "ai-play-dead",					OP_AI_PLAY_DEAD,						1,	1,			SEXP_GOAL_OPERATOR,	},
 	{ "ai-play-dead-persistent",		OP_AI_PLAY_DEAD_PERSISTENT,				1,	1,			SEXP_GOAL_OPERATOR, },
 
@@ -4218,19 +4218,23 @@ int check_sexp_potential_issues(int node, int *bad_node, SCP_string &issue_msg)
 			case OP_IS_DESTROYED:
 			case OP_TIME_WING_DESTROYED:
 			{
-				for (int n = first_arg_node; n >= 0; n = CDR(n))
+				if (!The_mission.ai_profile->flags[AI::Profile_Flags::Cancel_future_waves_of_any_wing_launched_from_an_exited_ship])
 				{
-					int wingnum = wing_lookup(CTEXT(n));
-					if (wingnum >= 0)
+					for (int n = first_arg_node; n >= 0; n = CDR(n))
 					{
-						auto wingp = &Wings[wingnum];
-						if (wingp->num_waves > 1 && wingp->arrival_location == ArrivalLocation::FROM_DOCK_BAY)
+						int wingnum = wing_lookup(CTEXT(n));
+						if (wingnum >= 0)
 						{
-							issue_msg = "Wing ";
-							issue_msg += wingp->name;
-							issue_msg += " has more than one wave and arrives from a docking bay.  Be careful when checking for this wing's destruction.  If the "
-								"mothership is destroyed before all waves have arrived, the wing will not be considered destroyed.";
-							return SEXP_CHECK_POTENTIAL_ISSUE;
+							auto wingp = &Wings[wingnum];
+							if (wingp->num_waves > 1 && wingp->arrival_location == ArrivalLocation::FROM_DOCK_BAY)
+							{
+								issue_msg = "Wing ";
+								issue_msg += wingp->name;
+								issue_msg += " has more than one wave and arrives from a docking bay.  Be careful when checking for this wing's destruction.  If the "
+									"mothership is destroyed before all waves have arrived, the wing will not be considered destroyed.  Note that the "
+									"$cancel future waves of any wing launched from an exited ship: flag can be used to fix this.";
+								return SEXP_CHECK_POTENTIAL_ISSUE;
+							}
 						}
 					}
 				}
@@ -14117,8 +14121,30 @@ void sexp_load_music(const char *filename, int type = -1, int sexp_var = -1)
 	int index;
 	if (sexp_var >= 0)
 	{
-		index = static_cast<int>(Sexp_music_handles.size());
-		Sexp_music_handles.push_back(-1);
+		// if any handle has expired, it can be closed; and any closed or expired index can be reused
+		// (note that handles are not unique across an entire mission; any variables pointing to handles
+		// that have been closed will see those handles reused for new sounds)
+		int found_i = -1, n = sz2i(Sexp_music_handles.size());
+		for (int i = 1; i < n; ++i)	// skip the default handle
+		{
+			int this_handle = Sexp_music_handles[i];
+
+			if ((this_handle < 0) || (!audiostream_is_playing(this_handle) && !audiostream_is_paused(this_handle)))
+			{
+				audiostream_close_file(this_handle, false);
+				found_i = i;
+				break;
+			}
+		}
+
+		// either reuse an index or choose a new index
+		if (found_i >= 0)
+			index = found_i;
+		else
+		{
+			index = static_cast<int>(Sexp_music_handles.size());
+			Sexp_music_handles.push_back(-1);
+		}
 	}
 	// otherwise we'll be reusing the default handle, so close anything that's already playing
 	else
@@ -14129,6 +14155,8 @@ void sexp_load_music(const char *filename, int type = -1, int sexp_var = -1)
 
 	// open the stream and save the handle in our list
 	Sexp_music_handles[index] = audiostream_open(filename, type);
+	if (Sexp_music_handles[index] < 0)
+		Warning(LOCATION, "In sexp_load_music, could not create audio handle for '%s'!  You might be trying to play too many sounds at once.", filename);
 
 	// if we have a variable, save it there too
 	if (sexp_var >= 0)
@@ -15480,10 +15508,16 @@ void sexp_self_destruct(int node)
 
 void sexp_cancel_future_waves(int node)
 {
-	for (int n = node; n != -1; n = CDR(n))	{
+	for (int n = node; n != -1; n = CDR(n))
+	{
 		auto wingp = eval_wing(n);
-		if (wingp) {
+		if (wingp)
+		{
+			// prevent any more waves from arriving by marking this as the last wave
 			wingp->num_waves = wingp->current_wave;
+
+			// we might need to clean up this wing if there are no ships currently in the mission
+			wing_maybe_cleanup(wingp);
 		}
 	}
 }
@@ -33179,13 +33213,20 @@ int query_operator_argument_type(int op, int argnum)
 			return OPF_POSITIVE;
 
 		case OP_AI_STAY_STILL:
-			if (!argnum)
+			if (argnum == 0)
 				return OPF_SHIP_POINT;
-			else
+			else if (argnum == 1)
 				return OPF_POSITIVE;
+			else
+				return OPF_BOOL;
 
 		case OP_AI_FORM_ON_WING:
-			return OPF_SHIP;
+			if (argnum == 0)
+				return OPF_SHIP;
+			else if (argnum == 1)
+				return OPF_POSITIVE;
+			else
+				return OPF_BOOL;
 
 		case OP_GOOD_REARM_TIME:
 		case OP_BAD_REARM_TIME:
@@ -39137,7 +39178,8 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\t2: Enter a non-zero number to loop. default is off (optional).\r\n"
 		"\t3: Enter a non-zero number to use environment effects. default is off (optional).\r\n"
 		"\t4: Numeric variable in which to store the music handle (optional).  If no variable is specified, the 'default' handle is used.  "
-		"Only one 'default' track can be played at a time, but multiple variable-managed tracks can be played.\r\n"
+		"Only one 'default' track can be played at a time, but multiple variable-managed tracks can be played.  NOTE: Handles are not globally unique.  If a sound "
+		"finishes playing, its handle may be reused for another sound played later in the mission.\r\n"
 	},
 
 	// Goober5000
@@ -40037,21 +40079,25 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\t1:\tName of target to ignore.\r\n"
 		"\t2:\tGoal priority (number between 0 and 89) - note, this does not imply any ranking of ignored targets." },
 
-	{ OP_AI_STAY_STILL, "Ai-stay still (Ship goal)\r\n"
+	{ OP_AI_STAY_STILL, "Ai-stay-still (Ship goal)\r\n"
 		"\tCauses the specified ship to stay still.  The ship will do nothing until attacked at "
 		"which time the ship will come to life and defend itself.\r\n\r\n"
-		"Takes 2 arguments...\r\n"
+		"By default all goals on the ship's goal list will be cleared when this goal runs, which means that the ship forgets both "
+		"this goal and all previous goals, and if it receives any other goal in any way, "
+		"it will immediately begin a new behavior.  Use the optional sexp flag (argument 3) to prevent this from happening.\r\n\r\n"
+		"Takes 2 to 3 arguments...\r\n"
 		"\t1:\tShip or waypoint the ship staying still will directly face (currently not implemented)\r\n"
-		"\t2:\tGoal priority (number between 0 and 89)." },
+		"\t2:\tGoal priority (number between 0 and 89).\r\n"
+		"\t3:\tWhether to clear all goals (optional).  If not specified this will be true, or the value defined in ai_profiles.\r\n"
+	},
 
 	{ OP_AI_PLAY_DEAD, "Ai-play-dead (Ship goal)\r\n"
 		"\tCauses the specified ship to pretend that it is dead and not do anything.  This "
 		"expression should be used to indicate that a ship has no pilot and cannot respond "
 		"to any enemy threats.  A ship playing dead will not respond to any attack.\r\n\r\n"
-		"Do note that the ship's goal list is cleared, which means both that it forgets "
-		"this goal and all previous goals, and that if it receives any other goal in any way, "
-		"it will immediately come back to life.  Use ai-play-dead-persistent to prevent this "
-		"from happening.\r\n\r\n"
+		"By default all goals on the ship's goal list will be cleared when this goal runs, which means that the ship forgets both "
+		"this goal and all previous goals, and if it receives any other goal in any way, "
+		"it will immediately come back to life.  Use ai-play-dead-persistent to prevent this from happening.\r\n\r\n"
 		"Takes 1 argument...\r\n"
 		"\t1:\tGoal priority (number between 0 and 89)." },
 
@@ -40067,9 +40113,17 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 
 	{ OP_AI_FORM_ON_WING, "Ai-form-on-wing (Ship Goal)\r\n"
 		"\tCauses the ship to form on the specified ship's wing. This works analogous to the "
-		"player order, and will cause all other goals specified for the ship to be purged.\r\n\r\n"
-		"Takes 1 argument...\r\n"
-		"\t1:\tShip to form on." },
+		"player order, and by default will cause all goals on the ship's goal list to be cleared when this goal runs, which means that the ship forgets both "
+		"this goal and all previous goals, and if it receives any other goal in any way, "
+		"it will immediately begin a new behavior.  By default it will also be given an internal override flag that will cause it to "
+		"take priority over all other goals.\r\n\r\n"
+		"Takes 1 to 5 arguments...\r\n"
+		"\t1:\tShip to form on.\r\n"
+		"\t2:\tGoal priority (number between 0 and 89, optional).  If not specified this will be 99, or the number defined in ai_profiles.\r\n"
+		"\t3:\tWhether to clear all goals (optional).  If not specified this will be true, or the value defined in ai_profiles.\r\n"
+		"\t4:\tWhether this goal should override all other goals (optional).  If not specified this will be true, or the value defined in ai_profiles.\r\n"
+		"\t5:\tWhether this goal should be cleared if any other goal is assigned (optional).  If not specified this will be false.\r\n"
+	},
 
 	{ OP_FLASH_HUD_GAUGE, "Ai-flash hud gauge (Training goal)\r\n"
 		"\tCauses the specified hud gauge to flash to draw the player's attention to it.\r\n\r\n"
@@ -40094,10 +40148,12 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	},
 
 	{ OP_CANCEL_FUTURE_WAVES, "cancel-future-waves\r\n"
-		"\tCancel all waves of a wing which have not yet arrived. Waves that have arrived already are not affected. is-destroyed-delay, ship-type-destroyed, and similar operators behave as though the cancelled waves do not exist.\r\n\r\nIf this operator is called on a wing which has not arrived, the wing will never arrive, exactly as if its arrival cue were set to false. That wing is not marked as destroyed.\r\n\r\n"
+		"\tCancel all waves of a wing which have not yet arrived. Waves that have arrived already are not affected. The is-destroyed-delay, "
+		"ship-type-destroyed, and similar operators behave as though the cancelled waves do not exist.\r\n\r\nIf this operator is called on a wing "
+		"which has not arrived, the wing will never arrive, exactly as if its arrival cue were set to false; and that wing is not marked as destroyed. "
+		"Otherwise, wings will be marked as destroyed or departed in the same manner as they would have been if they were truly on the last wave.\r\n\r\n"
 		"Takes 1 or more arguments...\r\n"
 		"\tAll:\tThe name of a wing to cancel." },
-
 
 	{ OP_SHIP_VISIBLE, "ship-visible\r\n"
 		"\tCauses the ships listed in this sexpression to be visible with player sensors.\r\n\r\n"
