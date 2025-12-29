@@ -619,8 +619,6 @@ void parse_xwi_flightgroup(mission *pm, const XWingMission *xwim, const XWMFligh
 				{
 					Warning(LOCATION, "This mission specifies multiple player starting ships.  Skipping %s.", Player_start_shipname);
 					prev_player_pobjp->flags.remove(Mission::Parse_Object_Flags::OF_Player_start);
-					prev_player_pobjp->flags.remove(Mission::Parse_Object_Flags::SF_Cargo_known);
-					prev_player_pobjp->flags.remove(Mission::Parse_Object_Flags::SF_Cannot_perform_scan);
 					Player_starts--;
 				}
 				else
@@ -629,8 +627,6 @@ void parse_xwi_flightgroup(mission *pm, const XWingMission *xwim, const XWMFligh
 
 			strcpy_s(Player_start_shipname, pobj.name);
 			pobj.flags.set(Mission::Parse_Object_Flags::OF_Player_start);
-			pobj.flags.set(Mission::Parse_Object_Flags::SF_Cargo_known);
-			pobj.flags.set(Mission::Parse_Object_Flags::SF_Cannot_perform_scan);
 			Player_starts++;
 		}
 
