@@ -1276,14 +1276,22 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 	strcpy_s(Squadron_wing_names[0], Starting_wing_names[0]);
 	strcpy_s(TVT_wing_names[0], Starting_wing_names[0]);
 
-	// indicate we are using X-Wing options
-	Mission_events.emplace_back();
-	auto config_event = &Mission_events.back();
-	config_event->name = "XWI Import";
-
+	// indicate we are using X-Wing options...
 	sprintf(sexp_buf, "( when ( true ) ( do-nothing ) )");
 	Mp = sexp_buf;
-	config_event->formula = get_sexp_main();
+	int marker_event_formula = get_sexp_main();
+
+	// option 1 - X-Wing identification
+	Mission_events.emplace_back();
+	auto identification_event = &Mission_events.back();
+	identification_event->name = "X-Wing Style Identification";
+	identification_event->formula = marker_event_formula;
+
+	// option 2 - X-Wing identification exclusively
+	Mission_events.emplace_back();
+	auto scan_event = &Mission_events.back();
+	scan_event->name = "No FreeSpace Style Scanning";
+	scan_event->formula = marker_event_formula;
 
 	// this seems like a sensible default
 	auto command_persona_name = "Flight Computer";
