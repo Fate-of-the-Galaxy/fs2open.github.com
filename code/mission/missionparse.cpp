@@ -6464,34 +6464,27 @@ bool parse_mission(mission *pm, XWingMission *xwim, int flags)
 	if (flags & MPF_ONLY_MISSION_INFO)
 		return true;
 
-	if (flags & MPF_IMPORT_XWI)
-	{
-		parse_xwi_mission(pm, xwim);
-	}
-	else
-	{
-		parse_plot_info(pm);
-		parse_variables();
-		parse_sexp_containers();
-		parse_briefing_info(pm);	// TODO: obsolete code, keeping so we don't obsolete existing mission files
-		parse_cutscenes(pm);
-		parse_fiction(pm);
-		parse_cmd_briefs(pm);
-		parse_briefing(pm, flags);
-		parse_debriefing_new(pm);
-		parse_player_info(pm);
-		parse_objects(pm, flags);
-		parse_wings(pm);
-		parse_events(pm);
-		parse_goals(pm);
-		parse_waypoints_and_jumpnodes(pm);
-		parse_messages(pm, flags);
-		parse_reinforcements(pm);
-		parse_bitmaps(pm);
-		parse_asteroid_fields(pm);
-		parse_music(pm, flags);
-		parse_custom_data(pm);
-	}
+	parse_plot_info(pm);
+	parse_variables();
+	parse_sexp_containers();
+	parse_briefing_info(pm);	// TODO: obsolete code, keeping so we don't obsolete existing mission files
+	parse_cutscenes(pm);
+	parse_fiction(pm);
+	parse_cmd_briefs(pm);
+	parse_briefing(pm, flags);
+	parse_debriefing_new(pm);
+	parse_player_info(pm);
+	parse_objects(pm, flags);
+	parse_wings(pm);
+	parse_events(pm);
+	parse_goals(pm);
+	parse_waypoints_and_jumpnodes(pm);
+	parse_messages(pm, flags);
+	parse_reinforcements(pm);
+	parse_bitmaps(pm);
+	parse_asteroid_fields(pm);
+	parse_music(pm, flags);
+	parse_custom_data(pm);
 
 	// if we couldn't load some mod data
 	if ((Num_unknown_ship_classes > 0) || ( Num_unknown_loadout_classes > 0 )) {
