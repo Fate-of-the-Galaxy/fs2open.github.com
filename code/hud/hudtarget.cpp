@@ -1608,7 +1608,7 @@ int hud_target_ship_can_be_scanned(ship *shipp)
 		return 1;
 	} else if (Use_new_scanning_behavior) {
 		return 0;
-	} else if ((sip->class_type < 0) || !(Ship_types[sip->class_type].flags[Ship::Type_Info_Flags::Scannable])) {
+	} else if ((sip->class_type < 0) || !(Ship_types[sip->class_type].flags[Ship::Type_Info_Flags::Targetable_as_unscanned])) {
 		return 0;
 	}
 
@@ -6092,7 +6092,7 @@ void HudGaugeWeaponEnergy::render(float /*frametime*/, bool config)
 			}
 			if(gr_screen.max_w_unscaled == 640) {
 				strcpy_s(shortened_name, weapon_name.c_str());
-				font::force_fit_string(shortened_name, NAME_LENGTH, fl2i(55 * scale), scale);
+				font::force_fit_string(shortened_name, NAME_LENGTH-1, fl2i(55 * scale), scale);
 				renderString(currentx, currenty, shortened_name, scale, config);
 			} else {
 				renderString(currentx, currenty, weapon_name.c_str(), scale, config);

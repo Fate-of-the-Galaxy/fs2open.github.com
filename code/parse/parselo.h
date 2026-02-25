@@ -84,13 +84,15 @@ extern const char *get_pointer_to_first_hash_symbol(const char *src, bool ignore
 extern int get_index_of_first_hash_symbol(const SCP_string &src, bool ignore_doubled_hash = false);
 
 extern void consolidate_double_characters(char *str, char ch);
+extern void consolidate_double_characters(SCP_string &str, char ch);
 
 // for limiting strings that may be very long; useful for dialog boxes
 char *three_dot_truncate(char *buffer, const char *source, size_t buffer_size);
 
 // white space
-extern int is_white_space(char ch);
-extern int is_white_space(unicode::codepoint_t cp);
+extern bool is_white_space(char ch);
+extern bool is_white_space(unicode::codepoint_t cp);
+extern size_t find_white_space(const char *str);
 extern void ignore_white_space(const char **pp = nullptr);
 extern void drop_trailing_white_space(char *str);
 extern void drop_leading_white_space(char *str);
@@ -102,8 +104,9 @@ extern void drop_leading_white_space(SCP_string &str);
 extern void drop_white_space(SCP_string &str);
 
 // gray space
-extern int is_gray_space(char ch);
+extern bool is_gray_space(char ch);
 extern bool is_gray_space(unicode::codepoint_t cp);
+extern size_t find_gray_space(const char *str);
 extern void ignore_gray_space(const char **pp = nullptr);
 
 // other
@@ -392,6 +395,7 @@ SCP_vector<std::pair<size_t, size_t>> str_wrap_to_width(const char* source_strin
 extern int required_string_fred(const char *pstr, const char *end = NULL);
 extern int required_string_either_fred(const char *str1, const char *str2);
 extern int optional_string_fred(const char *pstr, const char *end = NULL, const char *end2 = NULL);
+extern int required_string_one_of_fred(int arg_count, ...);
 
 // Goober5000
 extern ptrdiff_t replace_one(char *str, const char *oldstr, const char *newstr, size_t max_len, ptrdiff_t range = 0);

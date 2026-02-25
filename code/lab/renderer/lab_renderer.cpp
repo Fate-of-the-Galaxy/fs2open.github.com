@@ -13,6 +13,7 @@
 #include "particle/particle.h"
 #include "starfield/starfield.h"
 #include "starfield/nebula.h"
+#include "prop/prop.h"
 
 #include "missionui/missionscreencommon.h"
 #include "tracing/tracing.h"
@@ -112,6 +113,21 @@ void LabRenderer::renderModel(float frametime) {
 		else {
 			obj->hull_strength = Ship_info[Ships[obj->instance].ship_info_index].max_hull_strength;
 		}
+	}
+
+	if (obj->type == OBJ_PROP) {
+		prop* propp = prop_id_lookup(obj->instance);
+		propp->flags.set(Prop::Prop_Flags::Draw_as_wireframe, renderFlags[LabRenderFlag::ShowWireframe]);
+		propp->flags.set(Prop::Prop_Flags::Render_full_detail, renderFlags[LabRenderFlag::ShowFullDetail]);
+		propp->flags.set(Prop::Prop_Flags::Render_without_light,
+			renderFlags[LabRenderFlag::NoLighting] || currentMissionBackground == LAB_MISSION_NONE_STRING);
+		propp->flags.set(Prop::Prop_Flags::Render_without_diffuse, renderFlags[LabRenderFlag::NoDiffuseMap]);
+		propp->flags.set(Prop::Prop_Flags::Render_without_glowmap, renderFlags[LabRenderFlag::NoGlowMap]);
+		propp->flags.set(Prop::Prop_Flags::Render_without_normalmap, renderFlags[LabRenderFlag::NoNormalMap]);
+		propp->flags.set(Prop::Prop_Flags::Render_without_specmap, renderFlags[LabRenderFlag::NoSpecularMap]);
+		propp->flags.set(Prop::Prop_Flags::Render_without_reflectmap, renderFlags[LabRenderFlag::NoReflectMap]);
+		propp->flags.set(Prop::Prop_Flags::Render_without_heightmap, renderFlags[LabRenderFlag::NoHeightMap]);
+		propp->flags.set(Prop::Prop_Flags::Render_without_ambientmap, renderFlags[LabRenderFlag::NoAOMap]);
 	}
 
 	if (obj->type == OBJ_WEAPON) {
@@ -410,6 +426,10 @@ void LabRenderer::useBackground(const SCP_string& mission_name) {
 		if (ltp_name != ltp::current()->name) {
 				ltp::switch_to(ltp_name);
 		}
+
+		// Mission headers include additional fields between lighting profile and the
+		// background section. If we stopped at the lighting profile, we need to seek again.
+		skip_to_start_of_string("#Background bitmaps");
 
 		if (optional_string("#Background bitmaps")) {
 			required_string("$Num stars:");

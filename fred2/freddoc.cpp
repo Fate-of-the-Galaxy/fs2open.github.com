@@ -26,7 +26,6 @@
 #include "MainFrm.h"
 #include "Management.h"
 #include "MessageEditorDlg.h"
-#include "MissionSave.h"
 
 #include "ai/ai.h"
 #include "ai/aigoals.h"
@@ -140,7 +139,20 @@ bool CFREDDoc::autoload() {
 
 int CFREDDoc::autosave(char *desc) {
 	int i;
-	CFred_mission_save save;
+	Fred_mission_save save;
+	if (Mission_save_format == FSO_FORMAT_RETAIL) {
+		save.set_save_format(MissionFormat::RETAIL);
+	} else if (Mission_save_format == FSO_FORMAT_COMPATIBILITY_MODE) {
+		save.set_save_format(MissionFormat::COMPATIBILITY_MODE);
+	} else {
+		save.set_save_format(MissionFormat::STANDARD);
+	}
+	save.set_always_save_display_names(Always_save_display_names);
+	save.set_view_pos(view_pos);
+	save.set_view_orient(view_orient);
+	save.set_fred_alt_names(Fred_alt_names);
+	save.set_fred_callsigns(Fred_callsigns);
+
 	CWaitCursor wait;
 
 	if (Autosave_disabled) {
@@ -247,13 +259,13 @@ bool CFREDDoc::load_mission(const char *pathname, int flags) {
 	}
 
 	// message 2: unknown classes
-	if ((Num_unknown_ship_classes > 0) || (Num_unknown_weapon_classes > 0) || (Num_unknown_loadout_classes > 0)) {
+	if ((Num_unknown_ship_classes > 0) || (Num_unknown_prop_classes > 0) || (Num_unknown_weapon_classes > 0) || (Num_unknown_loadout_classes > 0)) {
 		if (flags & MPF_IMPORT_FSM) {
 			char msg[256];
-			sprintf(msg, "Fred encountered unknown ship/weapon classes when importing \"%s\" (path \"%s\"). You will have to manually edit the converted mission to correct this.", The_mission.name, pathname);
+			sprintf(msg, "Fred encountered unknown ship/prop/weapon classes when importing \"%s\" (path \"%s\"). You will have to manually edit the converted mission to correct this.", The_mission.name, pathname);
 			Fred_view_wnd->MessageBox(msg);
 		} else {
-			Fred_view_wnd->MessageBox("Fred encountered unknown ship/weapon classes when parsing the mission file. This may be due to mission disk data you do not have.");
+			Fred_view_wnd->MessageBox("Fred encountered unknown ship/prop/weapon classes when parsing the mission file. This may be due to mission disk data you do not have.");
 		}
 	}
 
@@ -493,7 +505,19 @@ void CFREDDoc::OnFileImportFSM() {
 
 		CString fs1_path_mfc(dlgFile.GetNextPathName(pos));
 		num_files++;
-		CFred_mission_save save;
+		Fred_mission_save save;
+		if (Mission_save_format == FSO_FORMAT_RETAIL) {
+			save.set_save_format(MissionFormat::RETAIL);
+		} else if (Mission_save_format == FSO_FORMAT_COMPATIBILITY_MODE) {
+			save.set_save_format(MissionFormat::COMPATIBILITY_MODE);
+		} else {
+			save.set_save_format(MissionFormat::STANDARD);
+		}
+		save.set_always_save_display_names(Always_save_display_names);
+		save.set_view_pos(view_pos);
+		save.set_view_orient(view_orient);
+		save.set_fred_alt_names(Fred_alt_names);
+		save.set_fred_callsigns(Fred_callsigns);
 
 		DWORD attrib;
 		FILE *fp;
@@ -825,7 +849,20 @@ BOOL CFREDDoc::OnOpenDocument(LPCTSTR pathname)
 #endif
 
 BOOL CFREDDoc::OnSaveDocument(LPCTSTR pathname) {
-	CFred_mission_save save;
+	Fred_mission_save save;
+	if (Mission_save_format == FSO_FORMAT_RETAIL) {
+		save.set_save_format(MissionFormat::RETAIL);
+	} else if (Mission_save_format == FSO_FORMAT_COMPATIBILITY_MODE) {
+		save.set_save_format(MissionFormat::COMPATIBILITY_MODE);
+	} else {
+		save.set_save_format(MissionFormat::STANDARD);
+	}
+	save.set_always_save_display_names(Always_save_display_names);
+	save.set_view_pos(view_pos);
+	save.set_view_orient(view_orient);
+	save.set_fred_alt_names(Fred_alt_names);
+	save.set_fred_callsigns(Fred_callsigns);
+
 	DWORD attrib;
 	FILE *fp;
 

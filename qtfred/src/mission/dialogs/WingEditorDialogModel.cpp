@@ -4,6 +4,7 @@
 #include "iff_defs/iff_defs.h"
 #include "mission/missionhotkey.h"
 #include "mission/missionparse.h"
+#include "missioneditor/common.h"
 #include <QObject>
 #include <QMessageBox>
 
@@ -68,7 +69,7 @@ std::vector<std::pair<SCP_string, bool>> WingEditorDialogModel::getDockBayPathsF
 {
 	std::vector<std::pair<SCP_string, bool>> out;
 
-	if (anchorShipnum < 0 || !ship_has_dock_bay(anchorShipnum))
+	if (anchorShipnum < 0 || !ship_has_hangar_bay(anchorShipnum))
 		return out;
 
 	const int sii = Ships[anchorShipnum].ship_info_index;
@@ -348,7 +349,7 @@ std::vector<std::pair<int, std::string>> WingEditorDialogModel::getArrivalTarget
 		char buf[NAME_LENGTH + 15];
 		for (int restrict_to_players = 0; restrict_to_players < 2; ++restrict_to_players) {
 			for (int iff = 0; iff < (int)::Iff_info.size(); ++iff) {
-				stuff_special_arrival_anchor_name(buf, iff, restrict_to_players, 0);
+				stuff_special_arrival_anchor_name(buf, iff, restrict_to_players, false);
 				items.emplace_back(get_special_anchor(buf), buf);
 			}
 		}
@@ -973,7 +974,7 @@ void WingEditorDialogModel::setArrivalPaths(const std::vector<std::pair<SCP_stri
 		return;
 
 	const int anchor = w->arrival_anchor;
-	if (anchor < 0 || !ship_has_dock_bay(anchor))
+	if (anchor < 0 || !ship_has_hangar_bay(anchor))
 		return;
 
 	// Rebuild mask in the same order we produced the list
@@ -1212,7 +1213,7 @@ void WingEditorDialogModel::setDeparturePaths(const std::vector<std::pair<SCP_st
 		return;
 
 	const int anchor = w->departure_anchor;
-	if (anchor < 0 || !ship_has_dock_bay(anchor))
+	if (anchor < 0 || !ship_has_hangar_bay(anchor))
 		return;
 
 	// Rebuild mask in the same order we produced the list

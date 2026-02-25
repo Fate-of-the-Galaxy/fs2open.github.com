@@ -27,6 +27,7 @@
 #include "playerman/player.h"				// used for the max_keyed_target stuff
 #include "IgnoreOrdersDlg.h"
 #include "mission/missionparse.h"
+#include "missioneditor/common.h"
 #include "model/model.h"
 #include "starfield/starfield.h"
 #include "jumpnode/jumpnode.h"
@@ -809,7 +810,7 @@ void CShipEditorDlg::initialize_data(int full_update)
 		{
 			// figure out what the box represents this as
 			char tmp[NAME_LENGTH + 15];
-			stuff_special_arrival_anchor_name(tmp, m_arrival_target, 0);
+			stuff_special_arrival_anchor_name(tmp, m_arrival_target, false);
 
 			// find it in the box
 			m_arrival_target = box->FindStringExact(-1, tmp);
@@ -1296,14 +1297,14 @@ int CShipEditorDlg::update_ship(int ship)
 	// the display name was precalculated, so now just assign it
 	if (m_ship_display_name == m_ship_name || m_ship_display_name.CompareNoCase("<none>") == 0)
 	{
-		if (Ships[ship].flags[Ship::Ship_Flags::Has_display_name])
+		if (Ships[ship].has_display_name())
 			set_modified();
 		Ships[ship].display_name = "";
 		Ships[ship].flags.remove(Ship::Ship_Flags::Has_display_name);
 	}
 	else
 	{
-		if (!Ships[ship].flags[Ship::Ship_Flags::Has_display_name])
+		if (!Ships[ship].has_display_name())
 			set_modified();
 		Ships[ship].display_name = m_ship_display_name;
 		Ships[ship].flags.set(Ship::Ship_Flags::Has_display_name);
@@ -2495,7 +2496,7 @@ void CShipEditorDlg::OnRestrictArrival()
 
 	arrive_from_ship = (int)box->GetItemData(m_arrival_target);
 
-	if (!ship_has_dock_bay(arrive_from_ship))
+	if (!ship_has_hangar_bay(arrive_from_ship))
 	{
 		Int3();
 		return;
@@ -2539,7 +2540,7 @@ void CShipEditorDlg::OnRestrictDeparture()
 
 	depart_to_ship = (int)box->GetItemData(m_departure_target);
 
-	if (!ship_has_dock_bay(depart_to_ship))
+	if (!ship_has_hangar_bay(depart_to_ship))
 	{
 		Int3();
 		return;

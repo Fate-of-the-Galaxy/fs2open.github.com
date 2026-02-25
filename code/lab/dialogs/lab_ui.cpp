@@ -11,6 +11,7 @@
 #include "ship/shiphit.h"
 #include "weapon/weapon.h"
 #include "mission/missionload.h"
+#include "prop/prop.h"
 
 using namespace ImGui;
 
@@ -87,6 +88,32 @@ void LabUi::build_weapon_subtype_list() const
 					}
 				}
 				weapon_idx++;
+			}
+		}
+	}
+}
+
+void LabUi::build_prop_subtype_list()
+{
+	for (auto& propc : Prop_categories) {
+		with_TreeNode(propc.name.c_str())
+		{
+			int prop_idx = 0;
+
+			for (auto const& class_def : Prop_info) {
+				if (lcase_equal(prop_get_category(class_def.category_index)->name, propc.name)) {
+					SCP_string node_label;
+					sprintf(node_label, "##PropClassIndex%i", prop_idx);
+					TreeNodeEx(node_label.c_str(),
+						ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen,
+						"%s",
+						class_def.name.c_str());
+
+					if (IsItemClicked() && !IsItemToggledOpen()) {
+						getLabManager()->changeDisplayedObject(LabMode::Prop, prop_idx);
+					}
+				}
+				prop_idx++;
 			}
 		}
 	}
@@ -171,7 +198,15 @@ void LabUi::build_object_list()
 	}
 }
 
-void LabUi::build_background_list() const
+void LabUi::build_prop_list()
+{
+	with_TreeNode("Prop Classes")
+	{
+		build_prop_subtype_list();
+	}
+}
+
+void LabUi::build_background_list()
 {
 	SCP_vector<SCP_string> t_missions;
 
@@ -271,6 +306,8 @@ void LabUi::show_object_selector() const
 			build_ship_list();
 
 			build_weapon_list();
+
+			build_prop_list();
 
 			build_object_list();
 		}
@@ -418,7 +455,8 @@ void LabUi::show_render_options()
 				Checkbox("Rotate/Translate Subsystems", &animate_subsystems);
 			}
 			Checkbox("Show full detail", &show_full_detail);
-			if (getLabManager()->CurrentMode != LabMode::Asteroid) {
+			if (getLabManager()->CurrentMode == LabMode::Ship ||
+				getLabManager()->CurrentMode == LabMode::Weapon) {
 				Checkbox("Show thrusters", &show_thrusters);
 				if (getLabManager()->CurrentMode == LabMode::Ship) {
 					Checkbox("Show afterburners", &show_afterburners);
@@ -478,6 +516,10 @@ void LabUi::show_render_options()
 					for (const auto &s : profile_list) {
 						if (Button(s.c_str(), ImVec2(-FLT_MIN, GetTextLineHeight() * 2))) {
 							ltp::switch_to(s);
+
+							// Avoid immediately overwriting the selected profile's values with
+							// stale slider state captured before the profile switch.
+							skip_setting_light_options_this_frame = true;
 						}
 					}
 				}
@@ -612,8 +654,10 @@ static void build_ship_table_info_txtbox(ship_info* sip)
 		static SCP_string table_text;
 		static int old_class = getLabManager()->CurrentClass;
 
-		if (table_text.length() == 0 || old_class != getLabManager()->CurrentClass)
+		if (table_text.length() == 0 || old_class != getLabManager()->CurrentClass) {
 			table_text = get_ship_table_text(sip);
+			old_class = getLabManager()->CurrentClass;
+		}
 
 		InputTextMultiline("##table_text",
 			const_cast<char*>(table_text.c_str()),
@@ -633,6 +677,7 @@ static void build_weapon_table_info_txtbox(weapon_info* wip)
 
 		if (table_text.length() == 0 || old_class != getLabManager()->CurrentClass) {
 			table_text = get_weapon_table_text(wip);
+			old_class = getLabManager()->CurrentClass;
 		}
 
 		InputTextMultiline("##weapon_table_text",
@@ -1064,6 +1109,9 @@ void LabUi::maybe_show_animation_category(const SCP_vector<animation::ModelAnima
 					case animation::ModelAnimationTriggerType::Docked:
 						button_label += "Trigger Docked Animation " + std::to_string(count++);
 						break;
+					case animation::ModelAnimationTriggerType::Scripted:
+						button_label += "Trigger Scripted Animation " + std::to_string(count++);
+						break;
 					default:
 						// We really shouldn't be here, but just in case
 						Assertion(false, "Unexpected animation trigger type %d", static_cast<int>(trigger_type));
@@ -1426,7 +1474,7 @@ void LabUi::show_object_options() const
 			{
 				build_weapon_options(shipp);
 			}
-		} else if (getLabManager()->CurrentMode == LabMode::Weapon && getLabManager()->isSafeForWeapons()) {
+		} else if (getLabManager()->CurrentMode == LabMode::Weapon && getLabManager()->CurrentClass >= 0) {
 			auto wip = &Weapon_info[getLabManager()->CurrentClass];
 
 			with_CollapsingHeader("Weapon Info")
@@ -1480,6 +1528,32 @@ void LabUi::show_object_options() const
 							}
 						}
 					}
+				}
+			}
+		} else if (getLabManager()->CurrentMode == LabMode::Prop && getLabManager()->CurrentClass >= 0) {
+			const auto& info = Prop_info[getLabManager()->CurrentClass];
+
+			with_CollapsingHeader("Object Info")
+			{
+				static SCP_string table_text;
+				static int old_class = -1;
+
+				if (table_text.empty() || old_class != getLabManager()->CurrentClass) {
+					table_text = get_prop_table_text(&info);
+					old_class = getLabManager()->CurrentClass;
+				}
+
+				InputTextMultiline("##prop_table_text",
+					const_cast<char*>(table_text.c_str()),
+					table_text.length(),
+					ImVec2(-FLT_MIN, GetTextLineHeight() * 16),
+					ImGuiInputTextFlags_ReadOnly);
+			}
+
+			with_CollapsingHeader("Object actions")
+			{
+				if (getLabManager()->isSafeForProps()) {
+					// No actions yet
 				}
 			}
 		}

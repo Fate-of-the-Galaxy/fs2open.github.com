@@ -68,23 +68,41 @@ static const SCP_unordered_map<SCP_string, SCP_string> retail_hashes = {
 
 
 //	Return true if this character is white space, else false.
-int is_white_space(char ch)
+bool is_white_space(char ch)
 {
 	return ((ch == ' ') || (ch == '\t') || (ch == EOLN) || (ch == CARRIAGE_RETURN));
 }
-int is_white_space(unicode::codepoint_t cp)
+
+//	Return true if this character is white space, else false.
+bool is_white_space(unicode::codepoint_t cp)
 {
 	return ((cp == UNICODE_CHAR(' ')) || (cp == UNICODE_CHAR('\t')) || (cp == (unicode::codepoint_t)EOLN) || (cp == (unicode::codepoint_t)CARRIAGE_RETURN));
 }
 
+//  Returns the length of the string up to but excluding any white space.  This could be the entire string if the string contains no white space.
+//	Equivalently, returns the position of the first white space character, or the string length if no white space is found.
+size_t find_white_space(const char *str)
+{
+	return strcspn(str, " \t\n\r");
+}
+
 // Returns true if this character is gray space, else false (gray space is white space except for EOLN).
-int is_gray_space(char ch)
+bool is_gray_space(char ch)
 {
 	return ((ch == ' ') || (ch == '\t'));
 }
 
-bool is_gray_space(unicode::codepoint_t cp) {
+// Returns true if this character is gray space, else false (gray space is white space except for EOLN).
+bool is_gray_space(unicode::codepoint_t cp)
+{
 	return cp == UNICODE_CHAR(' ') || cp == UNICODE_CHAR('\t');
+}
+
+//  Returns the length of the string up to but excluding any white space.  This could be the entire string if the string contains no white space.
+//	Equivalently, returns the position of the first white space character, or the string length if no white space is found.
+size_t find_gray_space(const char *str)
+{
+	return strcspn(str, " \t");
 }
 
 bool is_parenthesis(char ch)
@@ -823,6 +841,58 @@ int required_string_one_of(int arg_count, ...)
 		advance_to_eoln(NULL);
 		ignore_white_space();
 		count++;
+	}
+
+	return -1;
+}
+
+int required_string_one_of_fred(int arg_count, ...)
+{
+	Assertion(arg_count > 0, "required_string_one_of_fred() called with arg_count of %d; get a coder!\n", arg_count);
+
+	va_list vl;
+	int idx;
+	char* expected;
+
+	ignore_white_space();
+
+	while (*Mp != '\0') {
+		va_start(vl, arg_count);
+		for (idx = 0; idx < arg_count; idx++) {
+			expected = va_arg(vl, char*);
+			if (strnicmp(expected, Mp, strlen(expected)) == 0) {
+				diag_printf("Found required string [%s]\n", token_found = expected);
+				va_end(vl);
+				return idx;
+			}
+		}
+		va_end(vl);
+
+		advance_to_eoln(nullptr);
+		ignore_white_space();
+	}
+
+	// EOF reached without finding any token
+	if (*Mp == '\0') {
+		SCP_string message = "Unable to find any required token: ";
+
+		va_start(vl, arg_count);
+		for (idx = 0; idx < arg_count; idx++) {
+			expected = va_arg(vl, char*);
+			message += "[";
+			message += expected;
+			message += "]";
+			if (arg_count == 2 && idx == 0) {
+				message += " or ";
+			} else if (idx == arg_count - 2) {
+				message += ", or ";
+			} else if (idx < arg_count - 2) {
+				message += ", ";
+			}
+		}
+		va_end(vl);
+
+		diag_printf("%s\n", message.c_str());
 	}
 
 	return -1;
@@ -4475,7 +4545,7 @@ void consolidate_double_characters(char *src, char ch)
 	while (*src)
 	{
 		if (*src == ch && *(src + 1) == ch)
-			dest--;
+			--dest;
 
 		++src;
 		++dest;
@@ -4483,6 +4553,28 @@ void consolidate_double_characters(char *src, char ch)
 		if (src != dest)
 			*dest = *src;
 	}
+}
+
+// Goober5000
+// Used for escape sequences: ## to #, !! to !, etc.
+void consolidate_double_characters(SCP_string &str, char ch)
+{
+	auto src = str.begin();
+	auto dest = src;
+	while (src != str.end())
+	{
+		if (*src == ch && *(src + 1) == ch)
+			--dest;
+
+		++src;
+		++dest;
+
+		if (src != dest && src != str.end())
+			*dest = *src;
+	}
+
+	if (src != dest)
+		str.resize(dest - str.begin());
 }
 
 char *three_dot_truncate(char *buffer, const char *source, size_t buffer_size)

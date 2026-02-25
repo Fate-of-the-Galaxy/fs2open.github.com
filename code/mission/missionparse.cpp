@@ -67,6 +67,7 @@
 #include "parse/generic_log.h"
 #include "parse/parselo.h"
 #include "parse/sexp_container.h"
+#include "prop/prop.h"
 #include "scripting/global_hooks.h"
 #include "scripting/hook_api.h"
 #include "scripting/hook_conditions.h"
@@ -117,6 +118,7 @@ int Num_teams;
 fix Entry_delay_time = 0;
 
 int Num_unknown_ship_classes;
+int Num_unknown_prop_classes;
 int Num_unknown_weapon_classes;
 int Num_unknown_loadout_classes;
 
@@ -142,6 +144,9 @@ p_object Ship_arrival_list;	// for linked list of ships to arrive later
 
 // all the ships that we parse
 SCP_vector<p_object> Parse_objects;
+
+// all the props that we parse
+SCP_vector<parsed_prop> Parse_props;
 
 
 // list for arriving support ship
@@ -312,7 +317,8 @@ flag_def_list_new<Ship::Ship_Flags> Parse_ship_flags[] = {
 	{"fail-sound-locked-primary", Ship::Ship_Flags::Fail_sound_locked_primary, true, false},
 	{"fail-sound-locked-secondary", Ship::Ship_Flags::Fail_sound_locked_secondary, true, false},
 	{"aspect-immune", Ship::Ship_Flags::Aspect_immune, true, false},
-	{"cannot-perform-scan", Ship::Ship_Flags::Cannot_perform_scan, true, false},
+	{"cannot-perform-scan-hide-cargo", Ship::Ship_Flags::Cannot_perform_scan_hide_cargo, true, false},
+	{"cannot-perform-scan-show-cargo", Ship::Ship_Flags::Cannot_perform_scan_show_cargo, true, false},
 	{"no-targeting-limits", Ship::Ship_Flags::No_targeting_limits, true, false},
 	{"force-shields-on", Ship::Ship_Flags::Force_shields_on, true, false},
 	{"Destroy before Mission", Ship::Ship_Flags::Kill_before_mission,true, false}, //Not Printed to misson so can use descriptive name
@@ -482,7 +488,8 @@ flag_def_list_new<Mission::Parse_Object_Flags> Parse_object_flags[] = {
     { "fail-sound-locked-primary",			Mission::Parse_Object_Flags::SF_Fail_sound_locked_primary, true, false },
     { "fail-sound-locked-secondary",		Mission::Parse_Object_Flags::SF_Fail_sound_locked_secondary, true, false },
     { "aspect-immune",						Mission::Parse_Object_Flags::SF_Aspect_immune, true, false },
-	{ "cannot-perform-scan",			Mission::Parse_Object_Flags::SF_Cannot_perform_scan,	true, false },
+	{ "cannot-perform-scan-hide-cargo",		Mission::Parse_Object_Flags::SF_Cannot_perform_scan_hide_cargo, true, false },
+	{ "cannot-perform-scan-show-cargo",		Mission::Parse_Object_Flags::SF_Cannot_perform_scan_show_cargo, true, false },
 	{ "no-targeting-limits",				Mission::Parse_Object_Flags::SF_No_targeting_limits, true, false},
 };
 
@@ -548,7 +555,8 @@ parse_object_flag_description<Mission::Parse_Object_Flags> Parse_object_flag_des
     { Mission::Parse_Object_Flags::SF_Fail_sound_locked_primary,	"Play the firing fail sound when the weapon is locked."},
     { Mission::Parse_Object_Flags::SF_Fail_sound_locked_secondary,	"Play the firing fail sound when the weapon is locked."},
     { Mission::Parse_Object_Flags::SF_Aspect_immune,				"Ship cannot be targeted by Aspect Seekers."},
-	{ Mission::Parse_Object_Flags::SF_Cannot_perform_scan,			"Ship cannot scan other ships."},
+	{ Mission::Parse_Object_Flags::SF_Cannot_perform_scan_hide_cargo, "Ship cannot scan other ships, and the cargo line will not be shown on the HUD."},
+	{ Mission::Parse_Object_Flags::SF_Cannot_perform_scan_show_cargo, "Ship cannot scan other ships, but the cargo line will be shown on the HUD."},
 	{ Mission::Parse_Object_Flags::SF_No_targeting_limits,			"Ship is always targetable regardless of AWACS or targeting range limits."},
 };
 
@@ -582,6 +590,16 @@ parse_object_flag_description<Ship::Wing_Flags> Parse_wing_flag_descriptions[] =
 	{ Ship::Wing_Flags::Same_departure_warp_when_docked, "Docked ship use the same warp effect size upon departure as if they were not docked instead of the enlarged aggregate size." }};
 
 const size_t Num_parse_wing_flags = sizeof(Parse_wing_flags) / sizeof(flag_def_list_new<Ship::Wing_Flags>);
+
+flag_def_list_new<Mission::Parse_Object_Flags> Parse_prop_flags[] = {
+    { "no_collide",						Mission::Parse_Object_Flags::OF_No_collide,				true, false },
+};
+
+parse_object_flag_description<Mission::Parse_Object_Flags> Parse_prop_flag_descriptions[] = {
+    { Mission::Parse_Object_Flags::OF_No_collide,					"Prop cannot be collided with."},
+};
+
+const size_t Num_parse_prop_flags = sizeof(Parse_prop_flags) / sizeof(flag_def_list_new<Mission::Parse_Object_Flags>);
 
 // These are only the flags that are saved to the mission file.  See the MEF_ #defines.
 flag_def_list Mission_event_flags[] = {
@@ -3114,8 +3132,10 @@ void resolve_parse_flags(object *objp, flagset<Mission::Parse_Object_Flags> &par
 	if (parse_flags[Mission::Parse_Object_Flags::SF_Aspect_immune])
 		shipp->flags.set(Ship::Ship_Flags::Aspect_immune);
 
-	if (parse_flags[Mission::Parse_Object_Flags::SF_Cannot_perform_scan])
-		shipp->flags.set(Ship::Ship_Flags::Cannot_perform_scan);
+	if (parse_flags[Mission::Parse_Object_Flags::SF_Cannot_perform_scan_hide_cargo])
+		shipp->flags.set(Ship::Ship_Flags::Cannot_perform_scan_hide_cargo);
+	if (parse_flags[Mission::Parse_Object_Flags::SF_Cannot_perform_scan_show_cargo])
+		shipp->flags.set(Ship::Ship_Flags::Cannot_perform_scan_show_cargo);
 
 	if (parse_flags[Mission::Parse_Object_Flags::SF_No_targeting_limits])
 		shipp->flags.set(Ship::Ship_Flags::No_targeting_limits);
@@ -3509,11 +3529,18 @@ int parse_object(mission *pm, int  /*flag*/, p_object *p_objp)
     // set flags
     if (optional_string("+Flags:"))
     {
-        SCP_vector<SCP_string> unparsed;
-        parse_string_flag_list(p_objp->flags, Parse_object_flags, Num_parse_object_flags, &unparsed);
-        if (!unparsed.empty()) {
-            for (size_t k = 0; k < unparsed.size(); ++k) {
-                WarningEx(LOCATION, "Unknown flag in parse object flags: %s", unparsed[k].c_str());
+        SCP_vector<SCP_string> unparsed_vec;
+        parse_string_flag_list(p_objp->flags, Parse_object_flags, Num_parse_object_flags, &unparsed_vec);
+        if (!unparsed_vec.empty()) {
+			for (const auto& unparsed: unparsed_vec) {
+				// catch typos or deprecations
+				if (!stricmp(unparsed.c_str(), "no-collide") || !stricmp(unparsed.c_str(), "no_collide")) {
+					p_objp->flags.set(Mission::Parse_Object_Flags::OF_No_collide);
+				} else if (!stricmp(unparsed.c_str(), "cannot-perform-scan")) {
+					p_objp->flags.set(Mission::Parse_Object_Flags::SF_Cannot_perform_scan_hide_cargo);
+				} else {
+					WarningEx(LOCATION, "Unknown flag in parse object flags: %s", unparsed.c_str());
+				}
             }
         }
     }
@@ -3521,16 +3548,17 @@ int parse_object(mission *pm, int  /*flag*/, p_object *p_objp)
     // second set - Goober5000
     if (optional_string("+Flags2:"))
     {
-        SCP_vector<SCP_string> unparsed;
-        parse_string_flag_list(p_objp->flags, Parse_object_flags, Num_parse_object_flags, &unparsed);
-        if (!unparsed.empty()) {
-            for (size_t k = 0; k < unparsed.size(); ++k) {
+        SCP_vector<SCP_string> unparsed_vec;
+        parse_string_flag_list(p_objp->flags, Parse_object_flags, Num_parse_object_flags, &unparsed_vec);
+        if (!unparsed_vec.empty()) {
+            for (const auto& unparsed: unparsed_vec) {
 				// catch typos or deprecations
-				if (!stricmp(unparsed[k].c_str(), "no-collide") || !stricmp(unparsed[k].c_str(), "no_collide")) {
+				if (!stricmp(unparsed.c_str(), "no-collide") || !stricmp(unparsed.c_str(), "no_collide")) {
 					p_objp->flags.set(Mission::Parse_Object_Flags::OF_No_collide);
-				}
-				else {
-					WarningEx(LOCATION, "Unknown flag in parse object flags: %s", unparsed[k].c_str());
+				} else if (!stricmp(unparsed.c_str(), "cannot-perform-scan")) {
+					p_objp->flags.set(Mission::Parse_Object_Flags::SF_Cannot_perform_scan_hide_cargo);
+				} else {
+					WarningEx(LOCATION, "Unknown flag in parse object flags: %s", unparsed.c_str());
 				}
             }
         }
@@ -5109,14 +5137,85 @@ void parse_wing(mission *pm)
 	// Goober5000 - wing creation stuff moved to post_process_ships_wings
 }
 
+void parse_prop(mission* /*pm*/)
+{
+	parsed_prop p;
+	required_string("$Name:");
+	stuff_string(p.name, F_NAME, NAME_LENGTH);
+
+	// Maybe do this by name instead?
+	required_string("$Class:");
+	SCP_string class_name;
+	stuff_string(class_name, F_NAME);
+	int idx = prop_info_lookup(class_name.c_str());
+	if (idx < 0) {
+		SCP_string text;
+		sprintf(text, "Prop \"%s\" has an invalid prop type (props.tbl probably changed).", p.name);
+
+		if (Prop_info.empty()) {
+			text += "  No props.tbl is loaded. Prop will not be added to the mission!";
+		} else {
+			text += "  Prop will be added to the mission with type 0.";
+			idx = 0;
+		}
+
+		if (Fred_running) {
+			Warning(LOCATION, "%s", text.c_str());
+		} else {
+			mprintf(("MISSIONS: %s", text.c_str()));
+		}
+
+		Num_unknown_prop_classes++;
+	}
+	p.prop_info_index = idx;
+
+	required_string("$Location:");
+	stuff_vec3d(&p.position);
+
+	required_string("$Orientation:");
+	stuff_matrix(&p.orientation);
+
+	// set flags
+	if (optional_string("+Flags:")) {
+		SCP_vector<SCP_string> unparsed;
+		parse_string_flag_list(p.flags, Parse_prop_flags, Num_parse_prop_flags, &unparsed);
+		if (!unparsed.empty()) {
+			for (const auto& f : unparsed) {
+				WarningEx(LOCATION, "Unknown flag in parse prop flags: %s", f.c_str());
+			}
+		}
+	}
+
+	// if idx is still -1 then we have an empty props.tbl so we parse
+	// everything here and just discard it. A warning has already been generated above.
+	if (idx < 0) {
+		return;
+	}
+
+	Parse_props.emplace_back(std::move(p));
+}
+
 void parse_wings(mission* pm)
 {
 	required_string("#Wings");
-	while (required_string_either("#Events", "$Name:"))
-	{
+	while (true) {
+		int which = required_string_one_of(3, "#Events", "#Props", "$Name:");
+
+		if (which == -1 || which == 0 || which == 1) // #Events or #Props
+			break;
+
 		Assert(Num_wings < MAX_WINGS);
 		parse_wing(pm);
 		Num_wings++;
+	}
+}
+
+void parse_props(mission* pm)
+{
+	if (optional_string("#Props")) {
+		while (required_string_either("#Events", "$Name:")) {
+			parse_prop(pm);
+		}
 	}
 }
 
@@ -5195,6 +5294,22 @@ void post_process_path_stuff()
 
 		resolve_path_masks(wingp->arrival_anchor, &wingp->arrival_path_mask);
 		resolve_path_masks(wingp->departure_anchor, &wingp->departure_path_mask);
+	}
+}
+
+// MjnMixael
+void post_process_mission_props()
+{
+	for (const auto& propp : Parse_props) {
+		int objnum = prop_create(&propp.orientation, &propp.position, propp.prop_info_index, propp.name);
+
+		if (objnum >= 0) {
+			auto& obj = Objects[objnum];
+
+			if (propp.flags[Mission::Parse_Object_Flags::OF_No_collide]) {
+				obj.flags.remove(Object::Object_Flags::Collides);
+			}
+		}
 	}
 }
 
@@ -5321,7 +5436,6 @@ void post_process_ships_wings()
 		// create as usual
 		mission_parse_maybe_create_parse_object(&p_obj);
 	}
-
 
 	// ----------------- at this point the ships have been created -----------------
 	// Now set up the wings.  This must be done after both dock stuff and ship stuff.
@@ -6446,6 +6560,7 @@ bool parse_mission(mission *pm, XWingMission *xwim, int flags)
 
 	// reset parse error stuff
 	Num_unknown_ship_classes = 0;
+	Num_unknown_prop_classes = 0;
 	Num_unknown_weapon_classes = 0;
 	Num_unknown_loadout_classes = 0;
 
@@ -6476,6 +6591,7 @@ bool parse_mission(mission *pm, XWingMission *xwim, int flags)
 	parse_player_info(pm);
 	parse_objects(pm, flags);
 	parse_wings(pm);
+	parse_props(pm);
 	parse_events(pm);
 	parse_goals(pm);
 	parse_waypoints_and_jumpnodes(pm);
@@ -6487,7 +6603,7 @@ bool parse_mission(mission *pm, XWingMission *xwim, int flags)
 	parse_custom_data(pm);
 
 	// if we couldn't load some mod data
-	if ((Num_unknown_ship_classes > 0) || ( Num_unknown_loadout_classes > 0 )) {
+	if ((Num_unknown_ship_classes > 0) || (Num_unknown_prop_classes > 0) || ( Num_unknown_loadout_classes > 0 )) {
 		// if running on standalone server, just print to the log
 		if (Game_mode & GM_STANDALONE_SERVER) {
 			mprintf(("Warning!  Could not load %d ship classes!\n", Num_unknown_ship_classes));
@@ -6501,7 +6617,10 @@ bool parse_mission(mission *pm, XWingMission *xwim, int flags)
 			if (Num_unknown_ship_classes > 0) {
 				sprintf(text, "Warning!\n\nFreeSpace was unable to find %d ship class%s while loading this mission.  This can happen if you try to play a %s that is incompatible with the current mod.\n\n", Num_unknown_ship_classes, (Num_unknown_ship_classes > 1) ? "es" : "", (Game_mode & GM_CAMPAIGN_MODE) ? "campaign" : "mission");
 			}
-			else {
+			else if (Num_unknown_prop_classes > 0) {
+				sprintf(text, "Warning!\n\nFreeSpace was unable to find %d prop class%s while loading this mission.  This can happen if you try to play a %s that is incompatible with the current mod.\n\n", Num_unknown_prop_classes, (Num_unknown_prop_classes > 1) ? "es" : "", (Game_mode & GM_CAMPAIGN_MODE) ? "campaign" : "mission");
+			}
+			else if (Num_unknown_loadout_classes > 0) {
 				sprintf(text, "Warning!\n\nFreeSpace was unable to find %d weapon class%s while loading this mission.  This can happen if you try to play a %s that is incompatible with the current mod.\n\n", Num_unknown_loadout_classes, (Num_unknown_loadout_classes > 1) ? "es" : "", (Game_mode & GM_CAMPAIGN_MODE) ? "campaign" : "mission");
 			}
 
@@ -6562,6 +6681,8 @@ bool post_process_mission(mission *pm)
 	int			indices[MAX_SHIPS], objnum;
 	ship_weapon	*swp;
 	ship_obj *so;
+
+	post_process_mission_props();
 
 	// Goober5000 - this must be done even before post_process_ships_wings because it is a prerequisite
 	ship_clear_ship_type_counts();
@@ -7044,6 +7165,7 @@ void mission_init(mission *pm)
 
 	jumpnode_level_close();
 	waypoint_level_close();
+	props_level_close();
 
 	red_alert_invalidate_timestamp();
 	event_music_reset_choices();
@@ -7074,6 +7196,8 @@ void mission_init(mission *pm)
 		Wings[i].clear();
 	
 	Num_reinforcements = 0;
+
+	Parse_props.clear();
 
 	Asteroid_field.num_initial_asteroids = 0;
 
@@ -8747,7 +8871,7 @@ void check_anchor_for_hangar_bay(SCP_string &message, SCP_set<int> &anchor_shipn
 		return;
 	anchor_shipnums_checked.insert(anchor_shipnum);
 
-	if (!ship_has_dock_bay(anchor_shipnum))
+	if (!ship_has_hangar_bay(anchor_shipnum))
 	{
 		auto shipp = &Ships[anchor_shipnum];
 		sprintf(message, "%s (%s) is used as a%s anchor by %s %s (and possibly elsewhere too), but it does not have a hangar bay!", shipp->ship_name,

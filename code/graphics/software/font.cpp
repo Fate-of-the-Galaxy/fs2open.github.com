@@ -559,24 +559,48 @@ namespace font
 		font_initialized = false;
 	}
 
-	int force_fit_string(char *str, int max_str, int max_width, float scale)
+	int force_fit_string(char *str, size_t max_str_len, int max_width, float scale)
 	{
-		int w;
+		if (max_width <= 0 || max_str_len == 0) {
+			*str = 0;
+			return 0;
+		}
 
+		size_t len = strlen(str);
+		if (len > max_str_len) {
+			len = max_str_len;
+			str[len] = 0;
+		}
+
+		int w;
 		gr_get_string_size(&w, nullptr, str, scale);
 		if (w > max_width) {
-			if ((int)strlen(str) > max_str - 3) {
-				Assert(max_str >= 3);
-				str[max_str - 3] = 0;
+			constexpr char ellipsis_char = '.';
+			constexpr size_t ellipsis_len = 3;
+
+			// make sure an ellipsis will fit
+			if (len < ellipsis_len) {
+				*str = 0;
+				return 0;
 			}
 
-			strcpy(str + strlen(str) - 1, "...");
-			gr_get_string_size(&w, nullptr, str, scale);
-			while (w > max_width) {
-				Assert(strlen(str) >= 4);  // if this is hit, a bad max_width was passed in and the calling function needs fixing.
-				strcpy(str + strlen(str) - 4, "...");
-				gr_get_string_size(&w, nullptr, str, scale);
+			// replace the last few chars with an ellipsis
+			for (size_t i = 0; i < ellipsis_len; ++i) {
+				--len;
+				str[len] = ellipsis_char;
 			}
+
+			// measure with ellipsis before shrinking further (the ellipsis characters could be narrower than the characters they replaced)
+			gr_get_string_size(&w, nullptr, str, scale, len + ellipsis_len);
+
+			// move the ellipsis back until the whole string fits
+			while (len > 0 && w > max_width) {
+				--len;
+				str[len] = ellipsis_char;
+				gr_get_string_size(&w, nullptr, str, scale, len + ellipsis_len);
+			}
+
+			str[len + ellipsis_len] = 0;
 		}
 
 		return w;
@@ -786,7 +810,7 @@ void gr_printf(int x, int y, const char * format, ...)
 	if (!FontManager::isReady()) return;
 
 	va_start(args, format);
-	vsnprintf(grx_printf_text, sizeof(grx_printf_text) - 1, format, args);
+	vsnprintf(grx_printf_text, sizeof(grx_printf_text), format, args);
 	va_end(args);
 	grx_printf_text[sizeof(grx_printf_text) - 1] = '\0';
 
@@ -800,7 +824,7 @@ void gr_printf_menu(int x, int y, const char * format, ...)
 	if (!FontManager::isReady()) return;
 
 	va_start(args, format);
-	vsnprintf(grx_printf_text, sizeof(grx_printf_text) - 1, format, args);
+	vsnprintf(grx_printf_text, sizeof(grx_printf_text), format, args);
 	va_end(args);
 	grx_printf_text[sizeof(grx_printf_text) - 1] = '\0';
 
@@ -814,7 +838,7 @@ void gr_printf_menu_zoomed(int x, int y, const char * format, ...)
 	if (!FontManager::isReady()) return;
 
 	va_start(args, format);
-	vsnprintf(grx_printf_text, sizeof(grx_printf_text) - 1, format, args);
+	vsnprintf(grx_printf_text, sizeof(grx_printf_text), format, args);
 	va_end(args);
 	grx_printf_text[sizeof(grx_printf_text) - 1] = '\0';
 
@@ -828,7 +852,7 @@ void gr_printf_no_resize(int x, int y, const char * format, ...)
 	if (!FontManager::isReady()) return;
 
 	va_start(args, format);
-	vsnprintf(grx_printf_text, sizeof(grx_printf_text) - 1, format, args);
+	vsnprintf(grx_printf_text, sizeof(grx_printf_text), format, args);
 	va_end(args);
 	grx_printf_text[sizeof(grx_printf_text) - 1] = '\0';
 

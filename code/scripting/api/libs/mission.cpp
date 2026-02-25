@@ -36,6 +36,7 @@
 #include "parse/sexp/LuaAISEXP.h"
 #include "parse/sexp/sexp_lookup.h"
 #include "playerman/player.h"
+#include "prop/prop.h"
 #include "scripting/api/LuaPromise.h"
 #include "scripting/api/objs/LuaEnum.h"
 #include "scripting/api/objs/LuaSEXP.h"
@@ -57,6 +58,8 @@
 #include "scripting/api/objs/object.h"
 #include "scripting/api/objs/parse_object.h"
 #include "scripting/api/objs/promise.h"
+#include "scripting/api/objs/prop.h"
+#include "scripting/api/objs/propclass.h"
 #include "scripting/api/objs/sexpvar.h"
 #include "scripting/api/objs/ship_registry_entry.h"
 #include "scripting/api/objs/ship.h"
@@ -126,6 +129,45 @@ int object_subclass_count(A& object_subclass_array, size_t array_size)
 	return object_subclass_at_index(object_subclass_array, array_size, COUNT_OBJECTS);
 }
 
+// Overload for a vector of std::optional objects
+template <typename T>
+int object_subclass_at_index(const SCP_vector<std::optional<T>>& vec, int index)
+{
+	int count = 0;
+
+	for (const auto& opt_obj : vec) {
+
+		if (!opt_obj.has_value()) {
+			continue;
+		}
+
+
+		const T& obj = *opt_obj;
+
+		int objnum = obj.objnum;
+		if (objnum < 0 || objnum >= MAX_OBJECTS)
+			continue;
+		if (Objects[objnum].flags[Object::Object_Flags::Should_be_dead])
+			continue;
+
+		++count;
+
+		if (count == index) {
+			return obj.objnum;
+		}
+	}
+
+	if (index == COUNT_OBJECTS)
+		return count;
+	else
+		return -1;
+}
+
+template <typename A>
+int object_subclass_count(A& object_subclass_array)
+{
+	return object_subclass_at_index(object_subclass_array, COUNT_OBJECTS);
+}
 
 namespace scripting {
 namespace api {
@@ -294,7 +336,7 @@ ADE_INDEXER(l_Mission_Debris, "number Index", "Array of debris in the current mi
 	if( idx >= 0 && idx < (int)Debris.size() ) {
 		if (Debris[idx].objnum == -1) //Somehow accessed an invalid debris piece
 			return ade_set_error(L, "o", l_Debris.Set(object_h()));
-		return ade_set_args(L, "o", l_Debris.Set(object_h(&Objects[Debris[idx].objnum])));
+		return ade_set_args(L, "o", l_Debris.Set(object_h(Debris[idx].objnum)));
 	}
 
 	return ade_set_error(L, "o", l_Debris.Set(object_h()));
@@ -329,7 +371,7 @@ ADE_INDEXER(l_Mission_EscortShips, "number Index", "Gets escort ship at specifie
 	if(idx < 0)
 		return ade_set_error(L, "o", l_Ship.Set(object_h()));
 
-	return ade_set_args(L, "o", l_Ship.Set(object_h(&Objects[idx])));
+	return ade_set_args(L, "o", l_Ship.Set(object_h(idx)));
 }
 
 ADE_FUNC(__len, l_Mission_EscortShips, NULL, "Current number of escort ships", "number", "Current number of escort ships")
@@ -546,6 +588,43 @@ ADE_FUNC(__len, l_Mission_ParsedShips, NULL,
 		 "Number of parsed ships in the most recently loaded mission, or 0 if no mission has been parsed yet")
 {
 	return ade_set_args(L, "i", static_cast<int>(Parse_objects.size()));
+}
+
+//****SUBLIBRARY: Mission/Props
+ADE_LIB_DERIV(l_Mission_Props, "Props", nullptr, "Props in the mission", l_Mission);
+
+ADE_INDEXER(l_Mission_Props, "number/string IndexOrName", "Gets prop", "prop", "Prop handle, or invalid prop handle if index was invalid")
+{
+	const char* name;
+	if(!ade_get_args(L, "*s", &name))
+		return ade_set_error(L, "o", l_Prop.Set(object_h()));
+
+	int idx = prop_name_lookup(name);
+
+	if (idx >= 0)
+	{
+		return ade_set_args(L, "o", l_Prop.Set(object_h(&Objects[prop_id_lookup(idx)->objnum])));
+	}
+	else
+	{
+		idx = atoi(name);
+
+		int objnum = -1;
+		if (idx > 0)
+			objnum = object_subclass_at_index(Props, idx);
+
+		return ade_set_args(L, "o", l_Prop.Set(object_h(objnum)));
+	}
+}
+
+ADE_FUNC(__len, l_Mission_Props, nullptr,
+		 "Number of props in the mission. "
+			 "This function is somewhat slow, and should be set to a variable for use in looping situations. "
+			 "Note that props can be vanished, and so this value cannot be relied on for more than one frame.",
+		 "number",
+		 "Number of props in the mission, or 0 if props haven't been initialized yet")
+{
+	return ade_set_args(L, "i", object_subclass_count(Props));
 }
 
 //****SUBLIBRARY: Mission/Waypoints
@@ -1334,9 +1413,44 @@ ADE_FUNC(createShip,
 				));
 		}
 
-		return ade_set_args(L, "o", l_Ship.Set(object_h(&Objects[obj_idx])));
+		return ade_set_args(L, "o", l_Ship.Set(object_h(obj_idx)));
 	} else
 		return ade_set_error(L, "o", l_Ship.Set(object_h()));
+}
+
+ADE_FUNC(createProp,
+	l_Mission,
+	"[string Name, propclass Class /* First prop class by default */, orientation Orientation=null, vector Position /* null vector by default */]",
+	"Creates a prop and returns a handle to it using the specified name, class, world orientation, and world position.",
+	"prop",
+	"Prop handle, or invalid prop handle if prop couldn't be created")
+{
+	const char* name = nullptr;
+	int pclass       = 0;
+	matrix_h* orient = nullptr;
+	vec3d pos        = vmd_zero_vector;
+	ade_get_args(L, "|sooo", &name, l_Propclass.Get(&pclass), l_Matrix.GetPtr(&orient), l_Vector.Get(&pos));
+
+	if (!SCP_vector_inbounds(Prop_info, pclass)) {
+		return ade_set_error(L, "o", l_Prop.Set(object_h()));
+	}
+
+	matrix *real_orient = &vmd_identity_matrix;
+	if(orient != nullptr)
+	{
+		real_orient = orient->GetMatrix();
+	}
+
+	int obj_idx = prop_create(real_orient, &pos, pclass, name);
+
+	if(obj_idx >= 0) {
+		prop_info* pip = &Prop_info[pclass];
+
+		model_page_in_textures(pip->model_num, pclass);
+
+		return ade_set_args(L, "o", l_Prop.Set(object_h(&Objects[obj_idx])));
+	} else
+		return ade_set_error(L, "o", l_Prop.Set(object_h()));
 }
 
 ADE_FUNC(createDebris,
@@ -1571,7 +1685,7 @@ ADE_FUNC(createWeapon,
 	int obj_idx = weapon_create(&pos, real_orient, wclass, parent_idx, group);
 
 	if(obj_idx > -1)
-		return ade_set_args(L, "o", l_Weapon.Set(object_h(&Objects[obj_idx])));
+		return ade_set_args(L, "o", l_Weapon.Set(object_h(obj_idx)));
 	else
 		return ade_set_error(L, "o", l_Weapon.Set(object_h()));
 }
@@ -1647,7 +1761,7 @@ ADE_FUNC(createWarpeffect,
 	int obj_idx = fireball_create(&pos, fireballclass, FIREBALL_WARP_EFFECT, -1, radius, false, &velocity, duration, -1, &m_orient, 0, flags, opensound->idx, closesound->idx, opentime, closetime);
 
 	if (obj_idx > -1)
-		return ade_set_args(L, "o", l_Fireball.Set(object_h(&Objects[obj_idx])));
+		return ade_set_args(L, "o", l_Fireball.Set(object_h(obj_idx)));
 	else
 		return ade_set_error(L, "o", l_Fireball.Set(object_h()));
 }
@@ -1679,7 +1793,7 @@ ADE_FUNC(createExplosion,
 	int obj_idx = fireball_create(&pos, fireballclass, type, parent_idx, radius, false, &velocity);
 
 	if (obj_idx > -1)
-		return ade_set_args(L, "o", l_Fireball.Set(object_h(&Objects[obj_idx])));
+		return ade_set_args(L, "o", l_Fireball.Set(object_h(obj_idx)));
 	else
 		return ade_set_error(L, "o", l_Fireball.Set(object_h()));
 }
@@ -2908,7 +3022,7 @@ ADE_FUNC(getShipList,
 			return luacpp::LuaValueList{ luacpp::LuaValue::createNil(LInner) };
 		}
 
-		return luacpp::LuaValueList{ luacpp::LuaValue::createValue(LInner, l_Ship.Set(object_h(&Objects[so->objnum]))) };
+		return luacpp::LuaValueList{ luacpp::LuaValue::createValue(LInner, l_Ship.Set(object_h(so->objnum))) };
 	}));
 }
 
@@ -2940,7 +3054,67 @@ ADE_FUNC(getMissileList,
 			return luacpp::LuaValueList{ luacpp::LuaValue::createNil(LInner) };
 		}
 
-		return luacpp::LuaValueList{ luacpp::LuaValue::createValue(LInner, l_Weapon.Set(object_h(&Objects[mo->objnum]))) };
+		return luacpp::LuaValueList{ luacpp::LuaValue::createValue(LInner, l_Weapon.Set(object_h(mo->objnum))) };
+	}));
+}
+
+ADE_FUNC(getAsteroidList,
+	l_Mission,
+	nullptr,
+	"Get an iterator to the list of asteroids in this mission",
+	"iterator<asteroid>",
+	"An iterator across all asteroids in the mission. Can be used in a for .. in loop. Is not valid for more than one frame.")
+{
+	asteroid_obj* ao = &Asteroid_obj_list;
+
+	return ade_set_args(L, "u", luacpp::LuaFunction::createFromStdFunction(L, [ao](lua_State* LInner, const luacpp::LuaValueList& /*params*/) mutable -> luacpp::LuaValueList {
+		//Since the first element of a list is the next element from the head, and we start this function with the the captured "ao" object being the head, this GET_NEXT will return the first element on first call of this lambda.
+		//Similarly, an empty list is defined by the head's next element being itself, hence an empty list will immediately return nil just fine
+		ao = GET_NEXT(ao);
+
+		// skip should-be-dead asteroids
+		if (ao != nullptr) {
+			while (ao != END_OF_LIST(&Asteroid_obj_list)) {
+				if (!Objects[ao->objnum].flags[Object::Object_Flags::Should_be_dead]) {
+					break;
+				}
+				ao = GET_NEXT(ao);
+			}
+		}
+
+		if (ao == END_OF_LIST(&Asteroid_obj_list) || ao == nullptr) {
+			return luacpp::LuaValueList{ luacpp::LuaValue::createNil(LInner) };
+		}
+
+		return luacpp::LuaValueList{ luacpp::LuaValue::createValue(LInner, l_Asteroid.Set(object_h(ao->objnum))) };
+	}));
+}
+
+ADE_FUNC(getDebrisList,
+	l_Mission,
+	nullptr,
+	"Get an iterator to the list of debris in this mission",
+	"iterator<debris>",
+	"An iterator across all debris in the mission. Can be used in a for .. in loop. Is not valid for more than one frame.")
+{
+	size_t idx = 0;
+
+	return ade_set_args(L, "u", luacpp::LuaFunction::createFromStdFunction(L, [idx](lua_State* LInner, const luacpp::LuaValueList& /*params*/) mutable -> luacpp::LuaValueList {
+		// iterate through the Debris vector to find the next valid debris piece
+		while (idx < Debris.size()) {
+			const debris& db = Debris[idx];
+			idx++;
+
+			// debris must be Used, must have a valid objnum, and must not be should-be-dead
+			if (db.flags[Debris_Flags::Used] && db.objnum != -1) {
+				if (!Objects[db.objnum].flags[Object::Object_Flags::Should_be_dead]) {
+					return luacpp::LuaValueList{ luacpp::LuaValue::createValue(LInner, l_Debris.Set(object_h(db.objnum))) };
+				}
+			}
+		}
+
+		// end of list or no more valid debris found
+		return luacpp::LuaValueList{ luacpp::LuaValue::createNil(LInner) };
 	}));
 }
 

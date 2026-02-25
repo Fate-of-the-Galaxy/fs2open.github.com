@@ -11,6 +11,7 @@
 #include "ship/ship.h"
 #include "ship/shipfx.h"
 #include "particle/particle.h"
+#include "prop/prop.h"
 #include "weapon/muzzleflash.h"
 #include "weapon/beam.h"
 #include "ai/aigoals.h"
@@ -45,6 +46,7 @@ LabManager::LabManager() {
 	debris_init();
 	extern void debris_page_in();
 	debris_page_in();
+	props_level_init();
 	asteroid_level_init();
 	shockwave_level_init();
 	ship_level_init();
@@ -234,6 +236,9 @@ void LabManager::onFrame(float frametime) {
 	float rev_rate;
 	ship_info* sip = nullptr;
 
+	// First delete any dead objects so we don't end up processing them
+	obj_delete_all_that_should_be_dead();
+
 	if (CurrentObject != -1 && (Objects[CurrentObject].type == OBJ_SHIP)) {
 		sip = &Ship_info[Ships[Objects[CurrentObject].instance].ship_info_index];
 
@@ -413,6 +418,10 @@ void LabManager::cleanup() {
 
 		// Remove all objects
 		obj_delete_all();
+
+		// Reset large-ship split explosion state. In the lab we can delete exploding ships while
+		// cycling classes, so clear any lingering Split_ships entries tied to the previous view.
+		shipfx_large_blowup_level_init();
 
 		// Clean up the particles
 		particle::kill_all();
@@ -746,6 +755,12 @@ void LabManager::changeDisplayedObject(LabMode mode, int info_index, int subtype
 			// 1: Allow subsystem rotations/translations
 			// 2: Allow subystems to be processed
 			ai_add_ship_goal_scripting(AI_GOAL_PLAY_DEAD_PERSISTENT, -1, 100, nullptr, &Ai_info[Player_ship->ai_index], 0, 0);
+		}
+		break;
+	case LabMode::Prop:
+		CurrentObject = prop_create(&CurrentOrientation, &CurrentPosition, CurrentClass);
+		if (isSafeForProps()) {
+			ModelFilename = Prop_info[CurrentClass].pof_file;
 		}
 		break;
 	case LabMode::Weapon:
