@@ -1277,23 +1277,6 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 	strcpy_s(Squadron_wing_names[0], Starting_wing_names[0]);
 	strcpy_s(TVT_wing_names[0], Starting_wing_names[0]);
 
-	// indicate we are using X-Wing options...
-	sprintf(sexp_buf, "( when ( true ) ( do-nothing ) )");
-	Mp = sexp_buf;
-	int marker_event_formula = get_sexp_main();
-
-	// option 1 - X-Wing identification
-	Mission_events.emplace_back();
-	auto identification_event = &Mission_events.back();
-	identification_event->name = "X-Wing Style Identification";
-	identification_event->formula = marker_event_formula;
-
-	// option 2 - X-Wing identification exclusively
-	Mission_events.emplace_back();
-	auto scan_event = &Mission_events.back();
-	scan_event->name = "No FreeSpace Style Scanning";
-	scan_event->formula = marker_event_formula;
-
 	// this seems like a sensible default
 	auto command_persona_name = "Flight Computer";
 	pm->command_persona = message_persona_name_lookup(command_persona_name);
@@ -1324,6 +1307,24 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 	// X-Wing can have identically named ships and wings, but FSO can't
 	post_parse_disambiguate_wings();
 	post_parse_disambiguate_ships();
+
+
+	// indicate we are using X-Wing options...
+	sprintf(sexp_buf, "( when ( true ) ( do-nothing ) )");
+	int marker_event_formula = get_sexp_xwing(sexp_buf);
+
+	// option 1 - X-Wing identification
+	Mission_events.emplace_back();
+	auto identification_event = &Mission_events.back();
+	identification_event->name = "X-Wing Style Identification";
+	identification_event->formula = marker_event_formula;
+
+	// option 2 - X-Wing identification exclusively
+	Mission_events.emplace_back();
+	auto scan_event = &Mission_events.back();
+	scan_event->name = "XWI Set Scanning Behavior";
+	sprintf(sexp_buf, "( when ( true ) ( alter-ship-flag \"cannot-perform-scan-hide-cargo\" ( true ) ( false ) \"%s\" ) )", Player_start_shipname);
+	scan_event->formula = get_sexp_xwing(sexp_buf);
 }
 
 void post_process_xwi_mission(mission *pm, const XWingMission *xwim)
