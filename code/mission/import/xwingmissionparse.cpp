@@ -9,6 +9,7 @@
 #include "species_defs/species_defs.h"
 #include "starfield/starfield.h"
 #include "weapon/weapon.h"
+#include "utils/string_utils.h"
 
 #include "xwingbrflib.h"
 #include "xwinglib.h"
@@ -20,6 +21,13 @@ static int Player_flight_group = 0;
 static SCP_unordered_set<SCP_string, SCP_string_lcase_hash, SCP_string_lcase_equal_to> Do_not_reposition_wings;
 
 const int MAX_SPACE_OBJECTS = 64; // To match the XWing game engine limit
+
+int get_sexp_xwing(const SCP_string &sexp_buf)
+{
+	auto sexp_buf_copy = util::unique_copy(sexp_buf.c_str(), false);
+	Mp = sexp_buf_copy.get();
+	return get_sexp_main();
+}
 
 // vazor222
 void parse_xwi_mission_info(mission *pm, const XWingMission *xwim)
@@ -73,7 +81,7 @@ void xwi_add_attack_check(const XWingMission *xwim, const XWMFlightGroup *fg)
 {
 	char fg_name[NAME_LENGTH] = "";
 	char event_name[NAME_LENGTH];
-	char sexp_buf[NAME_LENGTH + 50];
+	SCP_string sexp_buf;
 
 	int fg_index = xwi_flightgroup_lookup(xwim, fg);
 	Assertion(fg_index >= 0, "Flight Group index must be valid");
@@ -94,15 +102,14 @@ void xwi_add_attack_check(const XWingMission *xwim, const XWMFlightGroup *fg)
 		sprintf(sexp_buf, "( when ( true ) ( fotg-wing-attacked-init \"%s\" ) )", fg_name);
 	else
 		sprintf(sexp_buf, "( when ( true ) ( fotg-ship-attacked-init \"%s\" ) )", fg_name);
-	Mp = sexp_buf;
-	event->formula = get_sexp_main();
+	event->formula = get_sexp_xwing(sexp_buf);
 }
 
 int xwi_determine_arrival_cue(const XWingMission *xwim, const XWMFlightGroup *fg)
 {
 	const XWMFlightGroup *arrival_fg = nullptr;
 	char arrival_fg_name[NAME_LENGTH] = "";
-	char sexp_buf[NAME_LENGTH * 2 + 80];
+	SCP_string sexp_buf;
 
 	bool check_wing = false;
 	if (fg->arrivalFlightGroup >= 0)
@@ -121,8 +128,7 @@ int xwi_determine_arrival_cue(const XWingMission *xwim, const XWMFlightGroup *fg
 	if (fg->arrivalEvent == XWMArrivalEvent::ae_afg_arrived)
 	{
 		sprintf(sexp_buf, "( has-arrived-delay 0 \"%s\" )", arrival_fg_name);
-		Mp = sexp_buf;
-		return get_sexp_main();
+		return get_sexp_xwing(sexp_buf);
 	}
 
 	if (fg->arrivalEvent == XWMArrivalEvent::ae_afg_attacked)
@@ -133,8 +139,7 @@ int xwi_determine_arrival_cue(const XWingMission *xwim, const XWMFlightGroup *fg
 			sprintf(sexp_buf, "( fotg-is-wing-attacked \"%s\" )", arrival_fg_name);
 		else
 			sprintf(sexp_buf, "( fotg-is-ship-attacked \"%s\" )", arrival_fg_name);
-		Mp = sexp_buf;
-		return get_sexp_main();
+		return get_sexp_xwing(sexp_buf);
 	}
 
 	if (fg->arrivalEvent == XWMArrivalEvent::ae_afg_captured)
@@ -143,8 +148,7 @@ int xwi_determine_arrival_cue(const XWingMission *xwim, const XWMFlightGroup *fg
 			sprintf(sexp_buf, "( fotg-is-wing-captured \"%s\" )", arrival_fg_name);
 		else
 			sprintf(sexp_buf, "( fotg-is-ship-captured \"%s\" )", arrival_fg_name);
-		Mp = sexp_buf;
-		return get_sexp_main();
+		return get_sexp_xwing(sexp_buf);
 	}
 
 	if (fg->arrivalEvent == XWMArrivalEvent::ae_afg_destroyed)
@@ -154,8 +158,7 @@ int xwi_determine_arrival_cue(const XWingMission *xwim, const XWMFlightGroup *fg
 			sprintf(sexp_buf, "( and ( percent-ships-destroyed 1 \"%s\" ) ( destroyed-or-departed-delay 0 \"%s\" ) )", arrival_fg_name, arrival_fg_name);
 		else
 			sprintf(sexp_buf, "( is-destroyed-delay 0 \"%s\" )", arrival_fg_name);
-		Mp = sexp_buf;
-		return get_sexp_main();
+		return get_sexp_xwing(sexp_buf);
 	}
 
 	if (fg->arrivalEvent == XWMArrivalEvent::ae_afg_disabled)
@@ -164,8 +167,7 @@ int xwi_determine_arrival_cue(const XWingMission *xwim, const XWMFlightGroup *fg
 			sprintf(sexp_buf, "( fotg-is-wing-disabled \"%s\" )", arrival_fg_name);
 		else
 			sprintf(sexp_buf, "( fotg-is-ship-disabled \"%s\" )", arrival_fg_name);
-		Mp = sexp_buf;
-		return get_sexp_main();
+		return get_sexp_xwing(sexp_buf);
 	}
 
 	if (fg->arrivalEvent == XWMArrivalEvent::ae_afg_identified)
@@ -174,8 +176,7 @@ int xwi_determine_arrival_cue(const XWingMission *xwim, const XWMFlightGroup *fg
 			sprintf(sexp_buf, "( fotg-is-wing-identified \"%s\" )", arrival_fg_name);
 		else
 			sprintf(sexp_buf, "( fotg-is-ship-identified \"%s\" )", arrival_fg_name);
-		Mp = sexp_buf;
-		return get_sexp_main();
+		return get_sexp_xwing(sexp_buf);
 	}
 
 	return Locked_sexp_true;
@@ -1241,7 +1242,7 @@ void post_parse_disambiguate_ships()
 void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 {
 	int index = -1;
-	char sexp_buf[35];
+	SCP_string sexp_buf;
 
 	// find player flight group
 	for (int i = 0; i < (int)xwim->flightgroups.size(); i++)
