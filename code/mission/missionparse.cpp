@@ -6567,7 +6567,7 @@ bool parse_mission(mission *pm, XWingMission *xwim, int flags)
 	Warned_about_team_out_of_range = false;
 
 	reset_parse();
-	mission_init(pm);
+	mission_init(pm, (flags & MPF_ONLY_MISSION_INFO) != 0);
 
 	if (flags & MPF_IMPORT_XWI)
 		parse_xwi_mission_info(pm, xwim);
@@ -7135,7 +7135,7 @@ void mission::Reset()
 /**
  * Initialize the mission and related data structures.
  */
-void mission_init(mission *pm)
+void mission_init(mission *pm, bool quick_init)
 {
 	pm->Reset();
 
@@ -7146,6 +7146,11 @@ void mission_init(mission *pm)
 
 	Mission_all_attack = 0;
 	Num_teams = 1;				// assume 1
+
+	// sometimes we don't need to run through the entire initialization,
+	// e.g. if we're just checking mission info
+	if (quick_init)
+		return;
 
 	init_sexp();
 	mission_goals_and_events_init();
@@ -9485,4 +9490,9 @@ bool check_for_24_3_data()
 		}
 	}
 	return false;
+}
+
+bool check_for_25_1_data()
+{
+	return (count_items_with_value(Props) > 0);
 }

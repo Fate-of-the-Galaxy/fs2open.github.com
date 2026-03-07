@@ -412,6 +412,14 @@ bool Editor::loadMission(const std::string& mission_name, int flags) {
 
 	return true;
 }
+void Editor::clean_up_selections() {
+#if 0
+	if (Briefing_dialog)
+		Briefing_dialog->icon_select(-1);
+#endif
+
+	unmark_all();
+}
 void Editor::unmark_all() {
 	if (numMarked > 0) {
 		for (auto i = 0; i < MAX_OBJECTS; i++) {
@@ -470,6 +478,7 @@ void Editor::unmarkObject(int obj) {
 
 void Editor::clearMission(bool fast_reload) {
 	// clean up everything we need to before we reset back to defaults.
+	clean_up_selections();
 #if 0
     if (Briefing_dialog){
         Briefing_dialog->reset_editor();
@@ -2642,29 +2651,24 @@ int Editor::error(const char* msg, ...) {
 	return 1;
 }
 int Editor::internal_error(const char* msg, ...) {
-	char buf[2048];
+	SCP_string buf;
 	va_list args;
 
 	va_start(args, msg);
-	vsnprintf(buf, sizeof(buf) - 1, msg, args);
+	vsprintf(buf, msg, args);
 	va_end(args);
-	buf[sizeof(buf) - 1] = '\0';
 
 	g_err = 1;
 
 #ifndef NDEBUG
-	char buf2[2048];
-
-	sprintf_safe(buf2, "%s\n\nThis is an internal error.  Please let Jason\n"
-		"know about this so he can fix it.  Click cancel to debug.", buf);
+	buf += "\n\nThis is an internal error.  Please notify a coder about this.  Click cancel to debug.";
 
 	if (_lastActiveViewport->dialogProvider->showButtonDialog(DialogType::Error,
 															  "Internal Error",
-															  buf2,
+															  buf,
 															  { DialogButton::Ok, DialogButton::Cancel })
 		== DialogButton::Cancel)
 		Int3();  // drop to debugger so the problem can be analyzed.
-
 #else
 	_lastActiveViewport->dialogProvider->showButtonDialog(DialogType::Error, "Error", buf, { DialogButton::Ok });
 #endif
