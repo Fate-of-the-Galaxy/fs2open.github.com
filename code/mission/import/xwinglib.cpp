@@ -136,18 +136,18 @@ bool XWingMission::load(XWingMission *m, const char *data)
 			return false;
 	}
 
-	m->completionMsg1 = h->completion_msg_1;
-	m->completionMsg2 = h->completion_msg_2;
-	m->completionMsg3 = h->completion_msg_3;
+	m->completionMsg1 = xwi_safe_string(h->completion_msg_1);
+	m->completionMsg2 = xwi_safe_string(h->completion_msg_2);
+	m->completionMsg3 = xwi_safe_string(h->completion_msg_3);
 
 	for (int n = 0; n < h->number_of_flight_groups; n++) {
 		xwi_flightgroup *fg = (xwi_flightgroup *)(data + sizeof(xwi_header) + sizeof(xwi_flightgroup) * n);
 		XWMFlightGroup nfg_buf;
 		XWMFlightGroup *nfg = &nfg_buf;
 
-		nfg->designation = fg->designation;
-		nfg->cargo = fg->cargo;
-		nfg->specialCargo = fg->special_cargo;
+		nfg->designation = xwi_safe_string(fg->designation);
+		nfg->cargo = xwi_safe_string(fg->cargo);
+		nfg->specialCargo = xwi_safe_string(fg->special_cargo);
 		nfg->specialShipNumber = fg->special_ship_number;
 
 		switch(fg->flight_group_type) {

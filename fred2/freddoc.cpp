@@ -704,7 +704,7 @@ void CFREDDoc::OnFileImportXWI()
 			*ch = '\0';
 
 		// assign this as the mission name
-		strcpy_s(The_mission.name, filename);
+		The_mission.name = filename;
 
 		// add new extension
 		strcat_s(filename, ".fs2");

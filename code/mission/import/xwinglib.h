@@ -1,3 +1,17 @@
+#pragma once
+
+#include <cstring>
+#include <string>
+
+// Fixed-width char fields in the X-Wing binary formats are not guaranteed to be
+// NUL-terminated when the field is fully populated, so we can't use the
+// std::string(const char *) constructor on them directly without risking a read
+// past the end of the struct.
+template<size_t N>
+std::string xwi_safe_string(const char (&buf)[N])
+{
+	return std::string(buf, strnlen(buf, N));
+}
 
 enum class XWMFlightGroupType : short
 {
