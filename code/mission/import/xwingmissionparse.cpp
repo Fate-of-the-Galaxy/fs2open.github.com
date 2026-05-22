@@ -15,7 +15,9 @@
 #include "xwinglib.h"
 #include "xwingmissionparse.h"
 
+// helper functions from missionparse.cpp
 extern int allocate_subsys_status();
+extern anchor_t get_anchor(const char *name);
 
 static int Player_flight_group = 0;
 static SCP_unordered_set<SCP_string, SCP_string_lcase_hash, SCP_string_lcase_equal_to> Do_not_reposition_wings;
@@ -182,19 +184,19 @@ int xwi_determine_arrival_cue(const XWingMission *xwim, const XWMFlightGroup *fg
 	return Locked_sexp_true;
 }
 
-int xwi_determine_anchor(const XWingMission *xwim, const XWMFlightGroup *fg)
+anchor_t xwi_determine_anchor(const XWingMission *xwim, const XWMFlightGroup *fg)
 {
 	int mothership_number = fg->mothership;
 
 	if (mothership_number >= 0)
 	{
 		if (mothership_number < (int)xwim->flightgroups.size())
-			return get_parse_name_index(xwim->flightgroups[mothership_number].designation.c_str());
+			return get_anchor(xwim->flightgroups[mothership_number].designation.c_str());
 		else
 			Warning(LOCATION, "Mothership number %d is out of range for Flight Group %s", mothership_number, fg->designation.c_str());
 	}
 
-	return -1;
+	return anchor_t::invalid();
 }
 
 const char *xwi_determine_formation(const XWMFlightGroup *fg)
@@ -488,9 +490,9 @@ void parse_xwi_flightgroup(mission *pm, const XWingMission *xwim, const XWMFligh
 
 		// if a wing doesn't have an anchor, make sure it is at-location
 		// (flight groups present at mission start will have arriveByHyperspace set to false)
-		if (wingp->arrival_anchor < 0)
+		if (!wingp->arrival_anchor.isValid())
 			wingp->arrival_location = ArrivalLocation::AT_LOCATION;
-		if (wingp->departure_anchor < 0)
+		if (!wingp->departure_anchor.isValid())
 			wingp->departure_location = DepartureLocation::AT_LOCATION;
 
 		wingp->wave_count = number_in_wave;
@@ -558,7 +560,7 @@ void parse_xwi_flightgroup(mission *pm, const XWingMission *xwim, const XWMFligh
 
 		if (wingp)
 		{
-			wing_bash_ship_name(pobj.name, wingp->name, wing_index + 1, nullptr);
+			wing_bash_ship_name(&pobj, wingp, wing_index + 1);
 			pobj.wingnum = wingnum;
 			pobj.pos_in_wing = wing_index;
 			pobj.arrival_cue = Locked_sexp_false;
@@ -579,9 +581,9 @@ void parse_xwi_flightgroup(mission *pm, const XWingMission *xwim, const XWMFligh
 
 			// if a ship doesn't have an anchor, make sure it is at-location
 			// (flight groups present at mission start will have arriveByHyperspace set to false)
-			if (pobj.arrival_anchor < 0)
+			if (!pobj.arrival_anchor.isValid())
 				pobj.arrival_location = ArrivalLocation::AT_LOCATION;
-			if (pobj.departure_anchor < 0)
+			if (!pobj.departure_anchor.isValid())
 				pobj.departure_location = DepartureLocation::AT_LOCATION;
 		}
 
@@ -920,11 +922,15 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 	}
 }	
 
-void post_parse_arrival_departure_anchor(const char *source_name, int &anchor)
+void post_parse_arrival_departure_anchor(const char *source_name, anchor_t &anchor)
 {
-	if (anchor < 0)
+	if (!anchor.isValid())
 		return;
-	auto anchor_name = Parse_names[anchor].c_str();
+	int anchor_val = anchor.value();
+	Assertion(anchor_val & ANCHOR_IS_PARSE_NAMES_INDEX, "Anchor %d must be a Parse_names index at this point!", anchor_val);
+	anchor_val &= ~ANCHOR_IS_PARSE_NAMES_INDEX;
+	Assertion(Parse_names.in_bounds(anchor_val), "Anchor %d is out of bounds.  Get a coder!", anchor_val);
+	auto anchor_name = Parse_names[anchor_val].c_str();
 
 	// a bit of an edge case... if an arrival or departure anchor is a wing, not a ship,
 	// then change it to the first ship in that wing
@@ -939,8 +945,7 @@ void post_parse_arrival_departure_anchor(const char *source_name, int &anchor)
 		{
 			if (pobj.wingnum == wingnum)
 			{
-				anchor = get_parse_name_index(pobj.name);
-				anchor_name = pobj.name;
+				anchor = get_anchor(pobj.name);
 				found = true;
 				break;
 			}
@@ -954,7 +959,23 @@ void post_parse_arrival_departure_anchor(const char *source_name, int &anchor)
 	}
 }
 
-void post_parse_remove_invalid_anchor_index(int invalid_anchor)
+void decrement_anchor(anchor_t &anchor)
+{
+	auto anchor_val = anchor.value();
+
+	if (anchor_val & ANCHOR_IS_PARSE_NAMES_INDEX)
+	{
+		anchor_val &= ~ANCHOR_IS_PARSE_NAMES_INDEX;
+		anchor_val--;
+		anchor_val |= ANCHOR_IS_PARSE_NAMES_INDEX;
+	}
+	else
+		anchor_val--;
+
+	anchor = anchor_t(anchor_val);
+}
+
+void post_parse_remove_invalid_anchor_index(anchor_t invalid_anchor)
 {
 	// 1) make sure nothing actually refers to this anchor
 	// 2) since this anchor will be removed, all subsequent anchors need to be reduced by 1
@@ -964,9 +985,9 @@ void post_parse_remove_invalid_anchor_index(int invalid_anchor)
 		Assertion(pobj.departure_anchor != invalid_anchor, "Departure anchor of parse object %s refers to invalid parse name index %d", pobj.name, invalid_anchor);
 
 		if (pobj.arrival_anchor > invalid_anchor)
-			--pobj.arrival_anchor;
+			decrement_anchor(pobj.arrival_anchor);
 		if (pobj.departure_anchor > invalid_anchor)
-			--pobj.departure_anchor;
+			decrement_anchor(pobj.departure_anchor);
 	}
 	for (int wingnum = 0; wingnum < Num_wings; ++wingnum)
 	{
@@ -976,9 +997,9 @@ void post_parse_remove_invalid_anchor_index(int invalid_anchor)
 		Assertion(w.departure_anchor != invalid_anchor, "Departure anchor of wing %s refers to invalid parse name index %d", w.name, invalid_anchor);
 
 		if (w.arrival_anchor > invalid_anchor)
-			--w.arrival_anchor;
+			decrement_anchor(w.arrival_anchor);
 		if (w.departure_anchor > invalid_anchor)
-			--w.departure_anchor;
+			decrement_anchor(w.departure_anchor);
 	}
 }
 
@@ -1006,8 +1027,8 @@ void post_parse_validate_anchors()
 		// parse names referring to wings are invalid
 		if (wingnum >= 0)
 		{
-			int invalid_anchor = static_cast<int>(std::distance(Parse_names.begin(), it));
-			post_parse_remove_invalid_anchor_index(invalid_anchor);
+			int invalid_parse_index = static_cast<int>(std::distance(Parse_names.begin(), it));
+			post_parse_remove_invalid_anchor_index(anchor_t(invalid_parse_index | ANCHOR_IS_PARSE_NAMES_INDEX));
 
 			Parse_names.erase(it);
 			it = Parse_names.begin();	// start over from the beginning
@@ -1203,18 +1224,7 @@ void post_parse_disambiguate_wings()
 				for (auto &pobj : Parse_objects)
 				{
 					if (pobj.wingnum == j)
-					{
-						bool needs_display_name;
-						wing_bash_ship_name(pobj.name, Wings[j].name, pobj.pos_in_wing + 1, &needs_display_name);
-
-						// set up display name if we need to
-						if (needs_display_name)
-						{
-							pobj.display_name = pobj.name;
-							end_string_at_first_hash_symbol(pobj.display_name);
-							pobj.flags.set(Mission::Parse_Object_Flags::SF_Has_display_name);
-						}
-					}
+						wing_bash_ship_name(&pobj, &Wings[j], pobj.pos_in_wing + 1);
 				}
 			}
 		}
