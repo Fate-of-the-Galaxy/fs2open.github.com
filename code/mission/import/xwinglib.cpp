@@ -91,6 +91,11 @@ struct xwi_objectgroup {
 };
 #pragma pack(pop)
 
+bool has_room(const char *p, const char *end, size_t n)
+{
+	return n <= static_cast<size_t>(end - p);
+}
+
 int XWingMission::arrival_delay_to_seconds(int delay)
 {
 	// If the arrival delay is less than or equal to 20, it's in minutes. If it's over 20, it's in 6 second blocks. So 21 is 6 seconds, for example
@@ -99,11 +104,17 @@ int XWingMission::arrival_delay_to_seconds(int delay)
 	return (delay - 20) * 6;
 }
 
-bool XWingMission::load(XWingMission *m, const char *data)
+bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 {
-	xwi_header *h = (xwi_header *)data;
+	const char *p = data;
+	const char *end = data + length;
+
+	if (!has_room(p, end, sizeof(xwi_header)))
+		return false;
+	auto h = reinterpret_cast<const xwi_header *>(p);
 	if (h->version != 2)
 		return false;
+	p += sizeof(xwi_header);
 
 	m->missionTimeLimit = h->mission_time_limit;
 
@@ -141,7 +152,9 @@ bool XWingMission::load(XWingMission *m, const char *data)
 	m->completionMsg3 = xwi_safe_string(h->completion_msg_3);
 
 	for (int n = 0; n < h->number_of_flight_groups; n++) {
-		xwi_flightgroup *fg = (xwi_flightgroup *)(data + sizeof(xwi_header) + sizeof(xwi_flightgroup) * n);
+		if (!has_room(p, end, sizeof(xwi_flightgroup)))
+			return false;
+		auto fg = reinterpret_cast<const xwi_flightgroup *>(p);
 		XWMFlightGroup nfg_buf;
 		XWMFlightGroup *nfg = &nfg_buf;
 
@@ -149,6 +162,9 @@ bool XWingMission::load(XWingMission *m, const char *data)
 		nfg->cargo = xwi_safe_string(fg->cargo);
 		nfg->specialCargo = xwi_safe_string(fg->special_cargo);
 		nfg->specialShipNumber = fg->special_ship_number;
+
+		// The Y-Wing-to-B-Wing reinterpretation below may need to mutate craft_status; keep it local so the buffer stays const
+		short craft_status = fg->craft_status;
 
 		switch(fg->flight_group_type) {
 			case 0:
@@ -165,10 +181,9 @@ bool XWingMission::load(XWingMission *m, const char *data)
 				// CraftType instead.  The status list repeats in the same order.  For example, a
 				// Y-Wing with a status of 1 has no warheads, but with a status of 11 becomes a
 				// B-Wing with no warheads.
-				if (fg->craft_status >= 10)
+				if (craft_status >= 10)
 				{
-					fg->flight_group_type = 18;	// B-Wing
-					fg->craft_status -= 10;
+					craft_status -= 10;
 					nfg->flightGroupType = XWMFlightGroupType::fg_B_Wing;
 				}
 
@@ -240,7 +255,7 @@ bool XWingMission::load(XWingMission *m, const char *data)
 				break;
 		}
 
-		switch(fg->craft_status) {
+		switch(craft_status) {
 			case 0:
 				nfg->craftStatus = XWMCraftStatus::cs_normal;
 				break;
@@ -600,12 +615,13 @@ bool XWingMission::load(XWingMission *m, const char *data)
 		assert(nfg->secondaryTarget == -1 || nfg->secondaryTarget < h->number_of_flight_groups);
 
 		m->flightgroups.push_back(*nfg);
+		p += sizeof(xwi_flightgroup);
 	}
 
 	for (int n = 0; n < h->number_of_objects; n++) {
-		xwi_objectgroup *oj =
-			(xwi_objectgroup *)(data + sizeof(xwi_header) + (sizeof(xwi_flightgroup) * h->number_of_flight_groups) +
-							   sizeof(xwi_objectgroup) * n);
+		if (!has_room(p, end, sizeof(xwi_objectgroup)))
+			return false;
+		auto oj = reinterpret_cast<const xwi_objectgroup *>(p);
 		XWMObject noj_buf;
 		XWMObject *noj = &noj_buf;
 
@@ -785,6 +801,7 @@ bool XWingMission::load(XWingMission *m, const char *data)
 		noj->object_roll = oj->object_roll - 90.0f;
 
 		m->objects.push_back(*noj);
+		p += sizeof(xwi_objectgroup);
 	}
 
 	return true;

@@ -13,6 +13,9 @@ std::string xwi_safe_string(const char (&buf)[N])
 	return std::string(buf, strnlen(buf, N));
 }
 
+// during parsing of binary files, check to see if the next chunk of data is present
+bool has_room(const char *p, const char *end, size_t n);
+
 enum class XWMFlightGroupType : short
 {
 	fg_None = 0,
@@ -318,7 +321,7 @@ class XWingMission
 public:
 
 	static int arrival_delay_to_seconds(int delay);
-	static bool load(XWingMission *xwim, const char *data);
+	static bool load(XWingMission *xwim, const char *data, size_t length);
 
 	int missionTimeLimit;
 	XWMEndEvent endEvent;
