@@ -19,6 +19,8 @@ if (WIN32)
 endif()
 
 add_file_folder("Source/Mission"
+    src/mission/CameraController.cpp
+    src/mission/CameraController.h
     src/mission/Editor.cpp
 	src/mission/EditorWing.cpp
     src/mission/Editor.h
@@ -38,6 +40,10 @@ add_file_folder("Source/Mission"
 add_file_folder("Source/Mission/Dialogs"
     src/mission/dialogs/AbstractDialogModel.cpp
     src/mission/dialogs/AbstractDialogModel.h
+	src/mission/dialogs/SceneBrowserModel.cpp
+	src/mission/dialogs/SceneBrowserModel.h
+	src/mission/dialogs/AboutDialogModel.cpp
+	src/mission/dialogs/AboutDialogModel.h
 	src/mission/dialogs/AsteroidEditorDialogModel.cpp
 	src/mission/dialogs/AsteroidEditorDialogModel.h
 	src/mission/dialogs/BackgroundEditorDialogModel.h
@@ -52,36 +58,44 @@ add_file_folder("Source/Mission/Dialogs"
 	src/mission/dialogs/DebriefingDialogModel.h
     src/mission/dialogs/FictionViewerDialogModel.cpp
     src/mission/dialogs/FictionViewerDialogModel.h
+	src/mission/dialogs/ErrorCheckerDialogModel.cpp
+	src/mission/dialogs/ErrorCheckerDialogModel.h
 	src/mission/dialogs/FormWingDialogModel.cpp
 	src/mission/dialogs/FormWingDialogModel.h
 	src/mission/dialogs/GlobalShipFlagsDialogModel.cpp
 	src/mission/dialogs/GlobalShipFlagsDialogModel.h
 	src/mission/dialogs/JumpNodeEditorDialogModel.cpp
 	src/mission/dialogs/JumpNodeEditorDialogModel.h
+	src/mission/dialogs/LayerManagerDialogModel.cpp
+	src/mission/dialogs/LayerManagerDialogModel.h
 	src/mission/dialogs/MissionCutscenesDialogModel.cpp
 	src/mission/dialogs/MissionCutscenesDialogModel.h
 	src/mission/dialogs/MissionEventsDialogModel.cpp
 	src/mission/dialogs/MissionEventsDialogModel.h
 	src/mission/dialogs/MissionGoalsDialogModel.cpp
 	src/mission/dialogs/MissionGoalsDialogModel.h
+	src/mission/dialogs/MissionStatsDialogModel.cpp
+	src/mission/dialogs/MissionStatsDialogModel.h
 	src/mission/dialogs/MissionSpecDialogModel.cpp
 	src/mission/dialogs/MissionSpecDialogModel.h
+	src/mission/dialogs/PreferencesDialogModel.cpp
+	src/mission/dialogs/PreferencesDialogModel.h
 	src/mission/dialogs/MusicPlayerDialogModel.cpp
 	src/mission/dialogs/MusicPlayerDialogModel.h
-	src/mission/dialogs/MusicTBLViewerModel.cpp
-	src/mission/dialogs/MusicTBLViewerModel.h
 	src/mission/dialogs/ObjectOrientEditorDialogModel.cpp
 	src/mission/dialogs/ObjectOrientEditorDialogModel.h
+	src/mission/dialogs/PropEditorDialogModel.cpp
+	src/mission/dialogs/PropEditorDialogModel.h
 	src/mission/dialogs/ReinforcementsEditorDialogModel.cpp	
 	src/mission/dialogs/ReinforcementsEditorDialogModel.h
 	src/mission/dialogs/RelativeCoordinatesDialogModel.cpp
 	src/mission/dialogs/RelativeCoordinatesDialogModel.h
-	src/mission/dialogs/SelectionDialogModel.cpp
-	src/mission/dialogs/SelectionDialogModel.h
 	src/mission/dialogs/ShieldSystemDialogModel.cpp
 	src/mission/dialogs/ShieldSystemDialogModel.h
 	src/mission/dialogs/TeamLoadoutDialogModel.cpp
 	src/mission/dialogs/TeamLoadoutDialogModel.h
+	src/mission/dialogs/TableViewerModel.cpp
+	src/mission/dialogs/TableViewerModel.h
 	src/mission/dialogs/VariableDialogModel.cpp
 	src/mission/dialogs/VariableDialogModel.h
 	src/mission/dialogs/VoiceActingManagerModel.h
@@ -90,8 +104,12 @@ add_file_folder("Source/Mission/Dialogs"
 	src/mission/dialogs/VolumetricNebulaDialogModel.h
 	src/mission/dialogs/WaypointEditorDialogModel.cpp
 	src/mission/dialogs/WaypointEditorDialogModel.h
+	src/mission/dialogs/WaypointPathGeneratorDialogModel.cpp
+	src/mission/dialogs/WaypointPathGeneratorDialogModel.h
 	src/mission/dialogs/WingEditorDialogModel.cpp
 	src/mission/dialogs/WingEditorDialogModel.h
+	src/mission/dialogs/HelpTopicsDialogModel.cpp
+	src/mission/dialogs/HelpTopicsDialogModel.h
 )
 add_file_folder("Source/Mission/Dialogs/MissionSpecs"
 	src/mission/dialogs/MissionSpecs/CustomDataDialogModel.cpp
@@ -116,12 +134,8 @@ add_file_folder("Source/Mission/Dialogs/ShipEditor"
 	src/mission/dialogs/ShipEditor/ShipSpecialStatsDialogModel.cpp
 	src/mission/dialogs/ShipEditor/ShipTextureReplacementDialogModel.h
 	src/mission/dialogs/ShipEditor/ShipTextureReplacementDialogModel.cpp
-	src/mission/dialogs/ShipEditor/ShipTBLViewerModel.cpp
-	src/mission/dialogs/ShipEditor/ShipTBLViewerModel.h
 	src/mission/dialogs/ShipEditor/ShipWeaponsDialogModel.cpp
 	src/mission/dialogs/ShipEditor/ShipWeaponsDialogModel.h
-	src/mission/dialogs/ShipEditor/WeaponsTBLViewerModel.cpp
-	src/mission/dialogs/ShipEditor/WeaponsTBLViewerModel.h
 	src/mission/dialogs/ShipEditor/ShipCustomWarpDialogModel.h
 	src/mission/dialogs/ShipEditor/ShipCustomWarpDialogModel.cpp
 	src/mission/dialogs/ShipEditor/ShipAltShipClassModel.h
@@ -129,8 +143,12 @@ add_file_folder("Source/Mission/Dialogs/ShipEditor"
 )
 
 add_file_folder("Source/UI"
+    src/ui/ControlBindings.cpp
+    src/ui/ControlBindings.h
     src/ui/FredView.cpp
     src/ui/FredView.h
+    src/ui/Theme.cpp
+    src/ui/Theme.h
     src/ui/QtGraphicsOperations.cpp
     src/ui/QtGraphicsOperations.h
 )
@@ -138,6 +156,8 @@ add_file_folder("Source/UI"
 add_file_folder("Source/UI/Dialogs"
 	src/ui/dialogs/AboutDialog.cpp
 	src/ui/dialogs/AboutDialog.h
+	src/ui/dialogs/MissionStatsDialog.cpp
+	src/ui/dialogs/MissionStatsDialog.h
 	src/ui/dialogs/AsteroidEditorDialog.cpp
 	src/ui/dialogs/AsteroidEditorDialog.h
 	src/ui/dialogs/BackgroundEditorDialog.h
@@ -150,14 +170,20 @@ add_file_folder("Source/UI/Dialogs"
 	src/ui/dialogs/CommandBriefingDialog.h
 	src/ui/dialogs/DebriefingDialog.cpp
 	src/ui/dialogs/DebriefingDialog.h
+	src/ui/dialogs/ErrorCheckerDialog.cpp
+	src/ui/dialogs/ErrorCheckerDialog.h
 	src/ui/dialogs/FictionViewerDialog.cpp
 	src/ui/dialogs/FictionViewerDialog.h
 	src/ui/dialogs/FormWingDialog.cpp
 	src/ui/dialogs/FormWingDialog.h
 	src/ui/dialogs/GlobalShipFlagsDialog.cpp
 	src/ui/dialogs/GlobalShipFlagsDialog.h
+	src/ui/dialogs/HelpTopicsDialog.cpp
+	src/ui/dialogs/HelpTopicsDialog.h
 	src/ui/dialogs/JumpNodeEditorDialog.cpp
 	src/ui/dialogs/JumpNodeEditorDialog.h
+	src/ui/dialogs/LayerManagerDialog.cpp
+	src/ui/dialogs/LayerManagerDialog.h
 	src/ui/dialogs/MissionCutscenesDialog.cpp
 	src/ui/dialogs/MissionCutscenesDialog.h
 	src/ui/dialogs/MissionEventsDialog.cpp
@@ -168,20 +194,26 @@ add_file_folder("Source/UI/Dialogs"
 	src/ui/dialogs/MissionSpecDialog.h
 	src/ui/dialogs/MusicPlayerDialog.cpp
 	src/ui/dialogs/MusicPlayerDialog.h
-	src/ui/dialogs/MusicTBLViewer.cpp
-	src/ui/dialogs/MusicTBLViewer.h
 	src/ui/dialogs/ObjectOrientEditorDialog.cpp
 	src/ui/dialogs/ObjectOrientEditorDialog.h
+	src/ui/dialogs/PreferencesDialog.cpp
+	src/ui/dialogs/PreferencesDialog.h
+	src/ui/dialogs/PropEditorDialog.cpp
+	src/ui/dialogs/PropEditorDialog.h
 	src/ui/dialogs/ReinforcementsEditorDialog.cpp
 	src/ui/dialogs/ReinforcementsEditorDialog.h
 	src/ui/dialogs/RelativeCoordinatesDialog.cpp
 	src/ui/dialogs/RelativeCoordinatesDialog.h
-	src/ui/dialogs/SelectionDialog.cpp
-	src/ui/dialogs/SelectionDialog.h
+	src/ui/dialogs/SaveAsTemplateDialog.cpp
+	src/ui/dialogs/SaveAsTemplateDialog.h
 	src/ui/dialogs/ShieldSystemDialog.h
 	src/ui/dialogs/ShieldSystemDialog.cpp
-	src/ui/dialogs/TeamLoadoutDialog.cpp	
+	src/ui/dialogs/TableViewerDialog.cpp
+	src/ui/dialogs/TableViewerDialog.h
+	src/ui/dialogs/TeamLoadoutDialog.cpp
 	src/ui/dialogs/TeamLoadoutDialog.h
+	src/ui/dialogs/TemplateBrowserDialog.cpp
+	src/ui/dialogs/TemplateBrowserDialog.h
 	src/ui/dialogs/VariableDialog.cpp
 	src/ui/dialogs/VariableDialog.h
 	src/ui/dialogs/VoiceActingManager.h
@@ -190,8 +222,19 @@ add_file_folder("Source/UI/Dialogs"
 	src/ui/dialogs/VolumetricNebulaDialog.cpp
 	src/ui/dialogs/WaypointEditorDialog.cpp
 	src/ui/dialogs/WaypointEditorDialog.h
+	src/ui/dialogs/WaypointPathGeneratorDialog.cpp
+	src/ui/dialogs/WaypointPathGeneratorDialog.h
 	src/ui/dialogs/WingEditorDialog.cpp
 	src/ui/dialogs/WingEditorDialog.h
+)
+
+add_file_folder("Source/UI/Dialogs/BriefingEditor"
+	src/ui/dialogs/BriefingEditor/CameraCoordinatesDialog.cpp
+	src/ui/dialogs/BriefingEditor/CameraCoordinatesDialog.h
+	src/ui/dialogs/BriefingEditor/IconCoordinatesDialog.cpp
+	src/ui/dialogs/BriefingEditor/IconCoordinatesDialog.h
+	src/ui/dialogs/BriefingEditor/IconFromShipDialog.cpp
+	src/ui/dialogs/BriefingEditor/IconFromShipDialog.h
 )
 add_file_folder("Source/UI/Dialogs/MissionSpecs"
 	src/ui/dialogs/MissionSpecs/CustomDataDialog.cpp
@@ -216,18 +259,16 @@ add_file_folder("Source/UI/Dialogs/ShipEditor"
 	src/ui/dialogs/ShipEditor/ShipSpecialStatsDialog.h
 	src/ui/dialogs/ShipEditor/ShipTextureReplacementDialog.h
 	src/ui/dialogs/ShipEditor/ShipTextureReplacementDialog.cpp
-	src/ui/dialogs/ShipEditor/ShipTBLViewer.h
-	src/ui/dialogs/ShipEditor/ShipTBLViewer.cpp
 	src/ui/dialogs/ShipEditor/ShipWeaponsDialog.cpp
 	src/ui/dialogs/ShipEditor/ShipWeaponsDialog.h
-	src/ui/dialogs/ShipEditor/BankModel.cpp
-	src/ui/dialogs/ShipEditor/BankModel.h
 	src/ui/dialogs/ShipEditor/ShipCustomWarpDialog.h
 	src/ui/dialogs/ShipEditor/ShipCustomWarpDialog.cpp
 	src/ui/dialogs/ShipEditor/ShipAltShipClass.h
 	src/ui/dialogs/ShipEditor/ShipAltShipClass.cpp
-	src/ui/dialogs/ShipEditor/WeaponsTBLViewer.cpp
-	src/ui/dialogs/ShipEditor/WeaponsTBLViewer.h
+)
+add_file_folder("Source/UI/Dialogs/EventEditor"
+	src/ui/dialogs/EventEditor/HeadAnimationPickerDialog.cpp
+	src/ui/dialogs/EventEditor/HeadAnimationPickerDialog.h
 )
 add_file_folder("Source/UI/General"
 	src/ui/dialogs/General/CheckBoxListDialog.cpp
@@ -236,7 +277,18 @@ add_file_folder("Source/UI/General"
 	src/ui/dialogs/General/ImagePickerDialog.h
 )
 
+add_file_folder("Source/UI/Panels"
+	src/ui/panels/FlowLayout.cpp
+	src/ui/panels/FlowLayout.h
+	src/ui/panels/SceneBrowserPanel.cpp
+	src/ui/panels/SceneBrowserPanel.h
+)
+
 add_file_folder("Source/UI/Util"
+	src/ui/util/default_dir.cpp
+	src/ui/util/default_dir.h
+	src/ui/util/ErrorChecker.cpp
+	src/ui/util/ErrorChecker.h
 	src/ui/util/ImageRenderer.cpp
 	src/ui/util/ImageRenderer.h
 	src/ui/util/menu.cpp
@@ -246,18 +298,28 @@ add_file_folder("Source/UI/Util"
 )
 
 add_file_folder("Source/UI/Widgets"
-    src/ui/widgets/CampaignMissionGraph.cpp
+	src/ui/widgets/bankTree.cpp
+	src/ui/widgets/bankTree.h
+	src/ui/widgets/BriefingMapWidget.cpp
+    src/ui/widgets/BriefingMapWidget.h
+	src/ui/widgets/CampaignMissionGraph.cpp
 	src/ui/widgets/CampaignMissionGraph.h
-    src/ui/widgets/ColorComboBox.cpp
-    src/ui/widgets/ColorComboBox.h
+	src/ui/widgets/ObjectComboBox.cpp
+	src/ui/widgets/ObjectComboBox.h
 	src/ui/widgets/LineEditDelegate.cpp
 	src/ui/widgets/LineEditDelegate.h
 	src/ui/widgets/FlagList.cpp
 	src/ui/widgets/FlagList.h
+	src/ui/widgets/IntegerSnapDoubleSpinBox.cpp
+	src/ui/widgets/IntegerSnapDoubleSpinBox.h
+	src/ui/widgets/LineEditDelegate.cpp
+	src/ui/widgets/LineEditDelegate.h
 	src/ui/widgets/NoWheelComboBox.cpp
 	src/ui/widgets/NoWheelComboBox.h
 	src/ui/widgets/NoWheelSpinBox.cpp
 	src/ui/widgets/NoWheelSpinBox.h
+	src/ui/widgets/PersonaColorComboBox.cpp
+	src/ui/widgets/PersonaColorComboBox.h
     src/ui/widgets/renderwidget.cpp
     src/ui/widgets/renderwidget.h
 	src/ui/widgets/sexp_tree.cpp
@@ -266,12 +328,8 @@ add_file_folder("Source/UI/Widgets"
 	src/ui/widgets/ShipFlagCheckbox.cpp
 	src/ui/widgets/SimpleListSelectDialog.cpp
 	src/ui/widgets/SimpleListSelectDialog.h
-	src/ui/widgets/weaponList.cpp
-	src/ui/widgets/weaponList.h
-	src/ui/widgets/bankTree.cpp
-	src/ui/widgets/bankTree.h
-	src/ui/widgets/PersonaColorComboBox.cpp
-	src/ui/widgets/PersonaColorComboBox.h
+	src/ui/widgets/MusicComboWidget.cpp
+	src/ui/widgets/MusicComboWidget.h
 )
 
 add_file_folder("UI"
@@ -286,38 +344,47 @@ add_file_folder("UI"
 	ui/CustomStringsDialog.ui
 	ui/CustomWingNamesDialog.ui
 	ui/DebriefingDialog.ui
+	ui/ErrorCheckerDialog.ui
 	ui/FictionViewerDialog.ui
 	ui/FormWingDialog.ui
     ui/FredView.ui
 	ui/GlobalShipFlagsDialog.ui
 	ui/JumpNodeEditorDialog.ui
+	ui/LayerManagerDialog.ui
 	ui/TeamLoadoutDialog.ui
 	ui/MissionCutscenesDialog.ui
 	ui/MissionEventsDialog.ui
 	ui/MissionGoalsDialog.ui
+	ui/MissionStatsDialog.ui
 	ui/MissionSpecDialog.ui
 	ui/MusicPlayerDialog.ui
 	ui/ObjectOrientationDialog.ui
+	ui/PreferencesDialog.ui
+	ui/PropEditorDialog.ui
 	ui/ReinforcementsDialog.ui
 	ui/RelativeCoordinatesDialog.ui
-	ui/SelectionDialog.ui
 	ui/ShieldSystemDialog.ui
 	ui/SoundEnvironmentDialog.ui
+	ui/TableViewerDialog.ui
 	ui/VoiceActingManager.ui
 	ui/VolumetricNebulaDialog.ui
     ui/WaypointEditorDialog.ui
+	ui/WaypointPathGeneratorDialog.ui
 	ui/ShipEditorDialog.ui
 	ui/ShipInitialStatus.ui
 	ui/ShipGoalsDialog.ui
 	ui/ShipSpecialStatsDialog.ui
 	ui/ShipFlagsDialog.ui
 	ui/ShipTextureReplacementDialog.ui
-	ui/ShipTBLViewer.ui
 	ui/ShipCustomWarpDialog.ui
 	ui/ShipAltShipClass.ui
 	ui/ShipWeaponsDialog.ui
 	ui/VariableDialog.ui
+	ui/HelpTopicsDialog.ui
 	ui/WingEditorDialog.ui
+	ui/SaveAsTemplateDialog.ui
+	ui/SceneBrowserPanel.ui
+	ui/TemplateBrowserDialog.ui
 )
 
 add_file_folder("Resources"
@@ -332,21 +399,26 @@ if (WIN32)
 endif()
 
 add_file_folder("Resources/Images"
-	resources/images/arrow_down.png
-	resources/images/arrow_left.png
-	resources/images/arrow_right.png
-	resources/images/arrow_up.png
-    resources/images/bitmap1.png
+    resources/images/operator.png
     resources/images/black_do.png
-    resources/images/bmp00001.png
     resources/images/chained_directive.png
     resources/images/chained.png
-    resources/images/constx.png
-    resources/images/constxy.png
-    resources/images/constxz.png
-    resources/images/consty.png
-    resources/images/constyz.png
-    resources/images/constz.png
+    resources/images/toolbar/layers-dark.png
+    resources/images/toolbar/layers-light.png
+    resources/images/toolbar/unhide-dark.png
+    resources/images/toolbar/unhide-light.png
+    resources/images/toolbar/constx-dark.png
+    resources/images/toolbar/constx-light.png
+    resources/images/toolbar/constxy-dark.png
+    resources/images/toolbar/constxy-light.png
+    resources/images/toolbar/constxz-dark.png
+    resources/images/toolbar/constxz-light.png
+    resources/images/toolbar/consty-dark.png
+    resources/images/toolbar/consty-light.png
+    resources/images/toolbar/constyz-dark.png
+    resources/images/toolbar/constyz-light.png
+    resources/images/toolbar/constz-dark.png
+    resources/images/toolbar/constz-light.png
     resources/images/cursor_rotate.png
     resources/images/data00.png
     resources/images/data05.png
@@ -369,34 +441,35 @@ add_file_folder("Resources/Images"
     resources/images/data90.png
     resources/images/data95.png
     resources/images/data.png
-    resources/images/fred_app.png
-    resources/images/fred_debug.png
-    resources/images/freddoc.ico
-    resources/images/fred.ico
-    resources/images/fredknows.png
-    resources/images/fred_splash.png
+	resources/images/fred_about.png
     resources/images/green_do.png
-	resources/images/next.png
-    resources/images/orbitsel.png
-    resources/images/play.png
-	resources/images/prev.png
+    resources/images/toolbar/orbitsel-dark.png
+    resources/images/toolbar/orbitsel-light.png
     resources/images/root_directive.png
     resources/images/root.png
-    resources/images/rotlocal.png
-    resources/images/selectlist.png
-    resources/images/selectlock.png
-    resources/images/selectmove.png
-    resources/images/select.png
-    resources/images/selectrot.png
-    resources/images/showdist.png
+    resources/images/toolbar/rotlocal-dark.png
+    resources/images/toolbar/rotlocal-light.png
+    resources/images/toolbar/select-dark.png
+    resources/images/toolbar/select-light.png
+    resources/images/toolbar/selectlist-dark.png
+    resources/images/toolbar/selectlist-light.png
+    resources/images/toolbar/selectlock-dark.png
+    resources/images/toolbar/selectlock-light.png
+    resources/images/toolbar/selectmove-dark.png
+    resources/images/toolbar/selectmove-light.png
+    resources/images/toolbar/selectrot-dark.png
+    resources/images/toolbar/selectrot-light.png
+    resources/images/toolbar/showdist-dark.png
+    resources/images/toolbar/showdist-light.png
     resources/images/splash.png
-	resources/images/stop.png
-    resources/images/toolbar1.png
-    resources/images/toolbar.png
     resources/images/V_fred.ico
     resources/images/variable.png
-    resources/images/wingdisband.png
-    resources/images/wingform.png
-    resources/images/zoomext.png
-    resources/images/zoomsel.png
+    resources/images/toolbar/wingdisband-dark.png
+    resources/images/toolbar/wingdisband-light.png
+    resources/images/toolbar/wingform-dark.png
+    resources/images/toolbar/wingform-light.png
+    resources/images/toolbar/zoomext-dark.png
+    resources/images/toolbar/zoomext-light.png
+    resources/images/toolbar/zoomsel-dark.png
+    resources/images/toolbar/zoomsel-light.png
 )

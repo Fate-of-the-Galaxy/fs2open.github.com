@@ -293,7 +293,7 @@ static void beam_set_state(weapon_info* wip, beam* bm, WeaponState state)
 	if ((map_entry != wip->state_effects.end()) && map_entry->second.isValid())
 	{
 		auto source = particle::ParticleManager::get()->createSource(map_entry->second);
-		source->setHost(make_unique<EffectHostBeam>(&Objects[bm->objnum]));
+		source->setHost(std::make_unique<EffectHostBeam>(&Objects[bm->objnum]));
 		source->finishCreation();
 	}
 }
@@ -583,7 +583,14 @@ int beam_fire(beam_fire_info *fire_info)
 			host = std::make_unique<EffectHostObject>(new_item->objp, local_pos, orient);
 		}
 		else {
-			host = std::make_unique<EffectHostTurret>(new_item->objp, new_item->subsys->system_info->turret_gun_sobj, new_item->firingpoint);
+			bool is_fighterbeam = false;
+			if (new_item->objp->type == OBJ_SHIP) {
+				auto shipp = &Ships[new_item->objp->instance];
+				if (new_item->subsys == &shipp->fighter_beam_turret_data) {
+					is_fighterbeam = true;
+				}
+			}
+			host = std::make_unique<EffectHostTurret>(new_item->objp, new_item->subsys->system_info->turret_gun_sobj, new_item->firingpoint, is_fighterbeam);
 		}
 
 		source->setHost(std::move(host));

@@ -1820,6 +1820,12 @@ void render_one_model_htl(object *objp) {
 
 	Assert(objp->type != OBJ_NONE);
 
+	// if this object isn't fully created yet, don't render it
+	if (objp->type == OBJ_SHIP && Ships[objp->instance].create_time == 0)
+		return;
+	if (objp->type == OBJ_PROP && (!Props[objp->instance].has_value() || Props[objp->instance].value().create_time == 0))
+		return;
+
 	if (objp->type == OBJ_JUMP_NODE) {
 		return;
 	}
@@ -1899,7 +1905,7 @@ void render_one_model_htl(object *objp) {
 		uint64_t flags = MR_NORMAL;
 
 		if (Show_dock_points) {
-			debug_flags |= MR_DEBUG_BAY_PATHS;
+			debug_flags |= MR_DEBUG_BAY_PATHS | MR_DEBUG_DOCK_POINTS;
 		}
 
 		if (Show_paths_fred) {

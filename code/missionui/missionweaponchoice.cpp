@@ -2909,7 +2909,7 @@ void weapon_select_do(float frametime)
 				if(icon->model_index != -1)
 				{
 					//Draw the model
-					draw_model_icon(icon->model_index, MR_NO_FOGGING | MR_NO_LIGHTING, wip->closeup_zoom / 2.5f, sx, sy, w, h, NULL, GR_RESIZE_MENU, &wip->closeup_pos);
+					draw_model_icon(icon->model_index, MR_NO_FOGGING | MR_NO_LIGHTING, sx, sy, w, h, nullptr, wip, 0.4f, GR_RESIZE_MENU);
 				}
 				else if(icon->laser_bmap != -1)
 				{
@@ -3141,7 +3141,7 @@ void wl_render_icon(int index, int x, int y, int num, int draw_num_flag, int hot
 		if(icon->model_index != -1)
 		{
 			//Draw the model
-			draw_model_icon(icon->model_index, MR_NO_FOGGING | MR_NO_LIGHTING, Weapon_info[index].closeup_zoom * 0.4f, x, y, 56, 24, NULL, GR_RESIZE_MENU);
+			draw_model_icon(icon->model_index, MR_NO_FOGGING | MR_NO_LIGHTING, x, y, 56, 24, nullptr, &Weapon_info[index], 0.4f, GR_RESIZE_MENU);
 		}
 		else if(icon->laser_bmap != -1)
 		{
@@ -4171,7 +4171,7 @@ void wl_apply_current_loadout_to_all_ships_in_current_wing()
 			{
 				SCP_string temp;
 				sprintf(temp, XSTR("%s is unable to carry %s weaponry", 1629), ship_name, wep_display_name);
-				error_messages.push_back(temp);
+				error_messages.push_back(std::move(temp));
 
 				error_flag = true;
 				continue;
@@ -4187,7 +4187,7 @@ void wl_apply_current_loadout_to_all_ships_in_current_wing()
 						sprintf(temp, XSTR("%s is unable to carry %s weaponry in primary bank %d", 1630), ship_name, wep_display_name, cur_bank+1);
 					else
 						sprintf(temp, XSTR("%s is unable to carry %s weaponry in secondary bank %d", 1631), ship_name, wep_display_name, cur_bank+1-MAX_SHIP_PRIMARY_BANKS);
-					error_messages.push_back(temp);
+					error_messages.push_back(std::move(temp));
 
 					error_flag = true;
 					continue;
@@ -4202,7 +4202,7 @@ void wl_apply_current_loadout_to_all_ships_in_current_wing()
 			{
 				SCP_string temp;
 				sprintf(temp, XSTR("Insufficient %s available to arm %s", 1632), Weapon_info[weapon_type_to_add].get_display_name(), ship_name);
-				error_messages.push_back(temp);
+				error_messages.push_back(std::move(temp));
 
 				error_flag = true;
 				continue;

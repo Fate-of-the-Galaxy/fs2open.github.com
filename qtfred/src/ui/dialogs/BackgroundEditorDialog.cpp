@@ -1,10 +1,12 @@
 #include "BackgroundEditorDialog.h"
+#include <QCloseEvent>
+#include "ui/util/default_dir.h"
 #include "ui/util/SignalBlockers.h"
 #include "ui/dialogs/General/ImagePickerDialog.h"
 #include "ui_BackgroundEditor.h"
 
+#include <globalincs/globals.h>
 #include <QMessageBox>
-#include <QSettings>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QInputDialog>
@@ -17,13 +19,22 @@ BackgroundEditorDialog::BackgroundEditorDialog(FredView* parent, EditorViewport*
     
 	ui->setupUi(this);
 
+	ui->skyboxEdit->setMaxLength(MAX_FILENAME_LEN - 1);
+	ui->envMapEdit->setMaxLength(MAX_FILENAME_LEN - 1);
+
 	initializeUi();
-	
+
 	// Resize the dialog to the minimum size
 	resize(QDialog::sizeHint());
 }
 
 BackgroundEditorDialog::~BackgroundEditorDialog() = default;
+
+void BackgroundEditorDialog::closeEvent(QCloseEvent* e)
+{
+	_viewport->editor->autosave("background editor");
+	QDialog::closeEvent(e);
+}
 
 void BackgroundEditorDialog::initializeUi()
 {
@@ -33,16 +44,16 @@ void BackgroundEditorDialog::initializeUi()
 	updateBackgroundControls();
 
 	// Bitmaps
-	ui->bitmapPitchSpin->setRange(_model->getOrientLimit().first, _model->getOrientLimit().second);
-	ui->bitmapBankSpin->setRange(_model->getOrientLimit().first, _model->getOrientLimit().second);
-	ui->bitmapHeadingSpin->setRange(_model->getOrientLimit().first, _model->getOrientLimit().second);
+	ui->bitmapPitchSpin->setRange(_model->getFloatOrientLimit().first, _model->getFloatOrientLimit().second);
+	ui->bitmapBankSpin->setRange(_model->getFloatOrientLimit().first, _model->getFloatOrientLimit().second);
+	ui->bitmapHeadingSpin->setRange(_model->getFloatOrientLimit().first, _model->getFloatOrientLimit().second);
 	ui->bitmapScaleXDoubleSpinBox->setRange(_model->getBitmapScaleLimit().first, _model->getBitmapScaleLimit().second);
 	ui->bitmapScaleYDoubleSpinBox->setRange(_model->getBitmapScaleLimit().first, _model->getBitmapScaleLimit().second);
 	ui->bitmapDivXSpinBox->setRange(_model->getDivisionLimit().first, _model->getDivisionLimit().second);
 	ui->bitmapDivYSpinBox->setRange(_model->getDivisionLimit().first, _model->getDivisionLimit().second);
-	ui->skyboxPitchSpin->setRange(_model->getOrientLimit().first, _model->getOrientLimit().second);
-	ui->skyboxBankSpin->setRange(_model->getOrientLimit().first, _model->getOrientLimit().second);
-	ui->skyboxHeadingSpin->setRange(_model->getOrientLimit().first, _model->getOrientLimit().second);
+	ui->skyboxPitchSpin->setRange(_model->getFloatOrientLimit().first, _model->getFloatOrientLimit().second);
+	ui->skyboxBankSpin->setRange(_model->getFloatOrientLimit().first, _model->getFloatOrientLimit().second);
+	ui->skyboxHeadingSpin->setRange(_model->getFloatOrientLimit().first, _model->getFloatOrientLimit().second);
 
 	const auto& names = _model->getAvailableBitmapNames();
 
@@ -53,8 +64,8 @@ void BackgroundEditorDialog::initializeUi()
 	refreshBitmapList();
 
 	// Suns
-	ui->sunPitchSpin->setRange(_model->getOrientLimit().first, _model->getOrientLimit().second);
-	ui->sunHeadingSpin->setRange(_model->getOrientLimit().first, _model->getOrientLimit().second);
+	ui->sunPitchSpin->setRange(_model->getFloatOrientLimit().first, _model->getFloatOrientLimit().second);
+	ui->sunHeadingSpin->setRange(_model->getFloatOrientLimit().first, _model->getFloatOrientLimit().second);
 	ui->sunScaleDoubleSpinBox->setRange(_model->getSunScaleLimit().first, _model->getSunScaleLimit().second);
 
 	const auto& sun_names = _model->getAvailableSunNames();
@@ -440,9 +451,12 @@ void BackgroundEditorDialog::on_removeButton_clicked()
 
 void BackgroundEditorDialog::on_importButton_clicked()
 {
-	const QString file = QFileDialog::getOpenFileName(this, "Import Backgrounds from File", QString(), "Freespace 2 Mission Files (*.fs2);;All Files (*)");
+	const QString importLastDir = util::getLastDir("background/importBackgrounds", CF_TYPE_MISSIONS);
+
+	const QString file = QFileDialog::getOpenFileName(this, "Import Backgrounds from File", importLastDir, "Freespace 2 Mission Files (*.fs2);;All Files (*)");
 	if (file.isEmpty())
 		return;
+	util::saveLastDir("background/importBackgrounds", file);
 	int count = _model->getImportableBackgroundCount(file.toUtf8().constData());
 
 	if (count <= 0) {
@@ -493,19 +507,19 @@ void BackgroundEditorDialog::on_bitmapTypeCombo_currentIndexChanged(int index)
 	refreshBitmapList();
 }
 
-void BackgroundEditorDialog::on_bitmapPitchSpin_valueChanged(int arg1)
+void BackgroundEditorDialog::on_bitmapPitchSpin_valueChanged(double arg1)
 {
-	_model->setBitmapPitch(arg1);
+	_model->setBitmapPitch(static_cast<float>(arg1));
 }
 
-void BackgroundEditorDialog::on_bitmapBankSpin_valueChanged(int arg1)
+void BackgroundEditorDialog::on_bitmapBankSpin_valueChanged(double arg1)
 {
-	_model->setBitmapBank(arg1);
+	_model->setBitmapBank(static_cast<float>(arg1));
 }
 
-void BackgroundEditorDialog::on_bitmapHeadingSpin_valueChanged(int arg1)
+void BackgroundEditorDialog::on_bitmapHeadingSpin_valueChanged(double arg1)
 {
-	_model->setBitmapHeading(arg1);
+	_model->setBitmapHeading(static_cast<float>(arg1));
 }
 
 void BackgroundEditorDialog::on_bitmapScaleXDoubleSpinBox_valueChanged(double arg1)
@@ -605,14 +619,14 @@ void BackgroundEditorDialog::on_sunSelectionCombo_currentIndexChanged(int index)
 	refreshSunList();
 }
 
-void BackgroundEditorDialog::on_sunPitchSpin_valueChanged(int arg1)
+void BackgroundEditorDialog::on_sunPitchSpin_valueChanged(double arg1)
 {
-	_model->setSunPitch(arg1);
+	_model->setSunPitch(static_cast<float>(arg1));
 }
 
-void BackgroundEditorDialog::on_sunHeadingSpin_valueChanged(int arg1)
+void BackgroundEditorDialog::on_sunHeadingSpin_valueChanged(double arg1)
 {
-	_model->setSunHeading(arg1);
+	_model->setSunHeading(static_cast<float>(arg1));
 }
 
 void BackgroundEditorDialog::on_sunScaleDoubleSpinBox_valueChanged(double arg1)
@@ -841,19 +855,15 @@ void BackgroundEditorDialog::updateAmbientSwatch()
 
 void BackgroundEditorDialog::on_skyboxModelButton_clicked()
 {
-	QSettings settings("QtFRED", "BackgroundEditor");
-	const QString lastDir = settings.value("skybox/lastDir", QDir::homePath()).toString();
+	const QString lastDir = util::getLastDir("background/skyboxModel", CF_TYPE_MODELS);
 
 	const QString path =
 		QFileDialog::getOpenFileName(this, tr("Select Skybox Model"), lastDir, tr("FS2 Models (*.pof);;All Files (*)"));
 	if (path.isEmpty())
 		return;
 
-	const QFileInfo fi(path);
-	settings.setValue("skybox/lastDir", fi.absolutePath());
-
-	const QString baseName = fi.completeBaseName();
-	_model->setSkyboxModelName(baseName.toUtf8().constData());
+	util::saveLastDir("background/skyboxModel", path);
+	_model->setSkyboxModelName(QFileInfo(path).completeBaseName().toUtf8().constData());
 
 	updateSkyboxControls();
 }
@@ -864,19 +874,19 @@ void BackgroundEditorDialog::on_skyboxEdit_textChanged(const QString& arg1)
 	updateSkyboxControls();
 }
 
-void BackgroundEditorDialog::on_skyboxPitchSpin_valueChanged(int arg1)
+void BackgroundEditorDialog::on_skyboxPitchSpin_valueChanged(double arg1)
 {
-	_model->setSkyboxPitch(arg1);
+	_model->setSkyboxPitch(static_cast<float>(arg1));
 }
 
-void BackgroundEditorDialog::on_skyboxBankSpin_valueChanged(int arg1)
+void BackgroundEditorDialog::on_skyboxBankSpin_valueChanged(double arg1)
 {
-	_model->setSkyboxBank(arg1);
+	_model->setSkyboxBank(static_cast<float>(arg1));
 }
 
-void BackgroundEditorDialog::on_skyboxHeadingSpin_valueChanged(int arg1)
+void BackgroundEditorDialog::on_skyboxHeadingSpin_valueChanged(double arg1)
 {
-	_model->setSkyboxHeading(arg1);
+	_model->setSkyboxHeading(static_cast<float>(arg1));
 }
 
 void BackgroundEditorDialog::on_skyboxNoLightingCheckBox_toggled(bool checked)
@@ -909,7 +919,7 @@ void BackgroundEditorDialog::on_noCullCheckBox_toggled(bool checked)
 	_model->setSkyboxNoCull(checked);
 }
 
-void BackgroundEditorDialog::on_noGlowmapsCheckBox_toggled(bool checked)
+void BackgroundEditorDialog::on_noGlowMapsCheckBox_toggled(bool checked)
 {
 	_model->setSkyboxNoGlowmaps(checked);
 }
@@ -929,18 +939,15 @@ void BackgroundEditorDialog::on_subspaceCheckBox_toggled(bool checked)
 
 void BackgroundEditorDialog::on_envMapButton_clicked()
 {
-	QSettings settings("QtFRED", "BackgroundEditor");
-	const QString lastDir = settings.value("envmap/lastDir", QDir::homePath()).toString();
+	const QString lastDir = util::getLastDir("background/envMap", CF_TYPE_MAPS);
 	const QString path = QFileDialog::getOpenFileName(this,
 		tr("Select Environment Map"),
 		lastDir,
 		tr("Environment Maps (*.dds);;All Files (*)"));
 	if (path.isEmpty())
 		return;
-	const QFileInfo fi(path);
-	settings.setValue("envmap/lastDir", fi.absolutePath());
-	const QString baseName = fi.completeBaseName();
-	_model->setEnvironmentMapName(baseName.toUtf8().constData());
+	util::saveLastDir("background/envMap", path);
+	_model->setEnvironmentMapName(QFileInfo(path).completeBaseName().toUtf8().constData());
 	updateMiscControls();
 }
 

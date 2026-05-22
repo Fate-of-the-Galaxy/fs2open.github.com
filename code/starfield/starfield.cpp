@@ -169,6 +169,7 @@ static void parse_motion_debris_func()
 	Motion_debris_enabled = enabled;
 }
 
+// coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
 auto MotionDebrisOption = options::OptionBuilder<bool>("Graphics.MotionDebris",
                      std::pair<const char*, int>{"Motion Debris", 1713},
                      std::pair<const char*, int>{"Enable or disable visible motion debris", 1714})
@@ -454,7 +455,7 @@ void parse_startbl(const char *filename)
 					}
 				}
 				else {
-					Starfield_bitmaps.push_back(sbm);
+					Starfield_bitmaps.push_back(std::move(sbm));
 				}
 			}
 
@@ -563,7 +564,7 @@ void parse_startbl(const char *filename)
 						Warning(LOCATION, "Sun bitmap '%s' listed more than once!!  Only using the first entry!", sbm.filename);
 				}
 				else {
-					Sun_bitmaps.push_back(sbm);
+					Sun_bitmaps.push_back(std::move(sbm));
 				}
 			}
 
@@ -593,7 +594,7 @@ void parse_startbl(const char *filename)
 					}
 				}
 				if (count == MAX_MOTION_DEBRIS_BITMAPS) {
-					Motion_debris_info.push_back(this_debris);
+					Motion_debris_info.push_back(std::move(this_debris));
 				} else {
 					error_display(0, "Not enough bitmaps defined for motion debris '%s'. Skipping!\n", this_debris.name.c_str());
 				}
@@ -623,7 +624,7 @@ void parse_startbl(const char *filename)
 					}
 				}
 				if (count == MAX_MOTION_DEBRIS_BITMAPS) {
-					Motion_debris_info.push_back(this_debris);
+					Motion_debris_info.push_back(std::move(this_debris));
 				} else {
 					error_display(0, "Not enough bitmaps defined for motion debris '%s'. Skipping!\n", this_debris.name.c_str());
 				}
@@ -653,7 +654,7 @@ void parse_startbl(const char *filename)
 						this_debris.bitmaps[i].name[0] = '\0';
 					}
 
-					Motion_debris_info.push_back(this_debris);
+					Motion_debris_info.push_back(std::move(this_debris));
 					check = static_cast<int>(Motion_debris_info.size()) - 1;
 				}
 

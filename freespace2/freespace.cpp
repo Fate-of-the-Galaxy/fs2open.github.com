@@ -41,6 +41,7 @@
 #include "asteroid/asteroid.h"
 #include "autopilot/autopilot.h"
 #include "bmpman/bmpman.h"
+#include "camera/photomode.h"
 #include "cfile/cfile.h"
 #include "cheats_table/cheats_table.h"
 #include "cmdline/cmdline.h"
@@ -273,6 +274,7 @@ static void parse_skill_func()
 	Game_skill_level = value;
 }
 
+// coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
 static auto GameSkillOption __UNUSED = options::OptionBuilder<int>("Game.SkillLevel",
                      std::pair<const char*, int>{"Skill Level", 1284},
                      std::pair<const char*, int>{"The skill level for the game.", 1700})
@@ -296,6 +298,7 @@ static void parse_screenshake_func()
 	Screenshake_enabled = enabled;
 }
 
+// coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
 auto ScreenShakeOption = options::OptionBuilder<bool>("Graphics.ScreenShake",
                      std::pair<const char*, int>{"Screen Shudder Effect", 1812}, // do xstr
                      std::pair<const char*, int>{"Toggles the screen shake effect for weapons, afterburners, and shockwaves", 1813})
@@ -318,6 +321,7 @@ static void parse_unfocused_pause_func()
 	Allow_unfocused_pause = enabled;
 }
 
+// coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
 auto UnfocusedPauseOption = options::OptionBuilder<bool>("Game.UnfocusedPause",
                      std::pair<const char*, int>{"Pause If Unfocused", 1814}, // do xstr
                      std::pair<const char*, int>{"Whether or not the game automatically pauses if it loses focus", 1815})
@@ -395,6 +399,7 @@ int Show_net_stats;
 bool Pre_player_entry = false;
 
 int	Fred_running = 0;
+int	Qtfred_running = 0;
 bool running_unittests = false;
 
 // required for hudtarget... kinda dumb, but meh
@@ -916,9 +921,9 @@ void game_level_close()
 	//to accidentally use an override here without realizing it.
 	if (!scripting::hooks::OnMissionEndHook->isActive() || !scripting::hooks::OnMissionEndHook->isOverride())
 	{
-		// save player-persistent variables and containers
-		mission_campaign_save_on_close_variables();	// Goober5000
-		mission_campaign_save_on_close_containers(); // jg18
+		// save on-close variables and containers
+		mission_campaign_store_variables(SEXP_VARIABLE_SAVE_ON_MISSION_CLOSE, false);	// Goober5000
+		mission_campaign_store_containers(ContainerType::SAVE_ON_MISSION_CLOSE, false);	// jg18
 
 		// De-Initialize the game subsystems
 		obj_delete_all();
@@ -945,6 +950,7 @@ void game_level_close()
 		ct_level_close();
 		beam_level_close();
 		mission_brief_common_reset();		// close out parsed briefing/mission stuff
+		photo_mode_set_active(false);
 		cam_close();
 		subtitles_close();
 		animation::ModelAnimationSet::stopAnimations();
@@ -1044,6 +1050,7 @@ void game_level_init()
 
 	Perspective_locked = false;
 	Slew_locked = false;
+	game_set_photo_mode_allowed(true);
 
 	// reset the geometry map and distortion map batcher, this should to be done pretty soon in this mission load process (though it's not required)
 	batch_reset();
@@ -3639,6 +3646,8 @@ void game_simulation_frame()
 		cam_do_frame(flRealframetime);
 	}
 
+	photo_mode_do_frame(flRealframetime);
+
 	// blow ships up in multiplayer dogfight
 	if( MULTIPLAYER_MASTER && (Net_player != nullptr) && (Netgame.type_flags & NG_TYPE_DOGFIGHT) && (f2fl(Missiontime) >= 2.0f) && !dogfight_blown){
 		// blow up all non-player ships
@@ -4115,7 +4124,7 @@ void game_do_full_frame(DEBUG_TIMER_SIG const vec3d* offset = nullptr, const mat
 			if (fov_override)
 				g3_set_fov(*fov_override);
 
-			scripting::hooks::OnHudDraw->run(scripting::hooks::ObjectDrawConditions{ Viewer_obj }, scripting_param_list);
+			scripting::hooks::OnHudDraw->run(scripting::hooks::ObjectDrawConditions{ Viewer_obj }, std::move(scripting_param_list));
 		}
 	}
 
@@ -4152,6 +4161,7 @@ void game_do_full_frame(DEBUG_TIMER_SIG const vec3d* offset = nullptr, const mat
 
 	gr_reset_clip();
 	game_render_post_frame();
+	photo_mode_maybe_render_hud();
 
 	game_tst_frame();
 
@@ -4549,6 +4559,7 @@ void game_do_frame(bool set_frametime)
 	}
 
 	game_update_missiontime();
+	photo_mode_clear_screenshot_queued_flag();
 
 	if (Game_mode & GM_STANDALONE_SERVER) {
 		std_multi_set_standalone_missiontime(f2fl(Missiontime));
@@ -4759,6 +4770,8 @@ int game_poll()
 
 		case KEY_PRINT_SCRN: 
 			{
+				photo_mode_set_screenshot_queued_flag();
+
 				static int counter = os_config_read_uint(nullptr, "ScreenshotNum", 0);
 				char tmp_name[MAX_FILENAME_LEN];
 
@@ -5272,6 +5285,10 @@ void game_leave_state( int old_state, int new_state )
 			break;
 	}
 
+	if (old_state == GS_STATE_GAME_PLAY && new_state != GS_STATE_GAME_PLAY) {
+		photo_mode_set_active(false);
+	}
+
 	// This is kind of a hack but it ensures options are logged even if scripting calls for a state change with an override active
 	if (old_state == GS_STATE_OPTIONS_MENU) {
 			if (new_state != GS_STATE_CONTROL_CONFIG && new_state != GS_STATE_HUD_CONFIG) {
@@ -5417,7 +5434,7 @@ void game_leave_state( int old_state, int new_state )
 				common_select_close();
 			}
 
-			if (new_state != GS_STATE_CONTROL_CONFIG && new_state != GS_STATE_HUD_CONFIG) {
+			if (new_state != GS_STATE_CONTROL_CONFIG && new_state != GS_STATE_HUD_CONFIG && new_state != GS_STATE_INGAME_OPTIONS) {
 				// unpause all sounds, since we could be headed back to the game
 				// only unpause if we're in-mission; we could also be in the main hall
 				if (Game_mode & GM_IN_MISSION) {
@@ -5767,7 +5784,7 @@ void game_enter_state( int old_state, int new_state )
 
 	if(scripting::hooks::OnStateStart->isActive()) {
 		if (scripting::hooks::OnStateStart->isOverride(script_param_list)) {
-			scripting::hooks::OnStateStart->run(script_param_list);
+			scripting::hooks::OnStateStart->run(std::move(script_param_list));
 			return;
 		}
 	}
@@ -6290,6 +6307,10 @@ void mouse_force_pos(int x, int y);
 			break;		
 
 		case GS_STATE_LOOP_BRIEF:
+			if (old_state == GS_STATE_MAIN_MENU) {
+				main_hall_stop_music(true);
+				main_hall_stop_ambient();
+			}
 			loop_brief_init();
 			break;
 
@@ -6711,7 +6732,7 @@ void game_spew_pof_info_sub(int model_num, polymodel *pm, int sm, CFILE *out, in
 
 	// find the # of faces for this _individual_ object	
 	total = submodel_get_num_polys(model_num, sm);
-	if(strstr(pm->submodel[sm].name, "-destroyed")){
+	if (submodel_is_destroyed_form(pm->submodel[sm].name)) {
 		sub_total_destroyed = total;
 	}
 	
@@ -7417,11 +7438,11 @@ void Do_model_timings_test()
 	int model_id[MAX_POLYGON_MODELS];
 
 	// Load them all
-	for (auto & sip : Ship_info) {
-		sip.model_num = model_load(sip.pof_file);
+	for (auto & si : Ship_info) {
+		si.model_num = model_load(&si, false);
 
-		model_used[sip.model_num % MAX_POLYGON_MODELS]++;
-		model_id[sip.model_num % MAX_POLYGON_MODELS] = sip.model_num;
+		model_used[si.model_num % MAX_POLYGON_MODELS]++;
+		model_id[si.model_num % MAX_POLYGON_MODELS] = si.model_num;
 	}
 
 	Texture_fp = fopen( NOX("ShipTextures.txt"), "wt" );
@@ -7553,7 +7574,7 @@ int detect_lang()
 
 	// try and open the file to verify
 	font::stuff_first(first_font);
-	CFILE *detect = cfopen(const_cast<char*>(first_font.c_str()), "rb");
+	CFILE *detect = cfopen(first_font.c_str(), "rb");
 
 	// will use default setting if something went wrong
 	if (!detect)

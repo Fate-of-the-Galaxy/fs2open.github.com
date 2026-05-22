@@ -10,6 +10,7 @@
 
 #include "autopilot/autopilot.h"
 #include "camera/camera.h"
+#include "camera/photomode.h"
 #include "controlconfig/controlsconfig.h"
 #include "debugconsole/console.h"
 #include "freespace.h"
@@ -91,6 +92,7 @@ static void parse_flight_mode_func()
 	}
 }
 
+// coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
 auto FlightModeOption = options::OptionBuilder<FlightMode>("Game.FlightMode",
 	std::pair<const char*, int>{"Flight Mode", 1842},
 	std::pair<const char*, int>{"Choose the flying style to use during gameplay.", 1843})
@@ -123,6 +125,7 @@ static void parse_flight_cursor_extent_func()
 	Flight_cursor_extent = value;
 }
 
+// coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
 auto FlightCursorExtentOption = options::OptionBuilder<float>("Game.FlightCursorExtent",
 	std::pair<const char*, int>{"Flight Cursor Extent", 1846},
 	std::pair<const char*, int>{"How far from the center the cursor can go.", 1847})
@@ -146,6 +149,7 @@ static void parse_cursor_deadzone_func()
 	Flight_cursor_deadzone = value;
 }
 
+// coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
 auto FlightCursorDeadzoneOption = options::OptionBuilder<float>("Game.FlightCursorDeadzone",
 	std::pair<const char*, int>{"Flight Cursor Deadzone", 1848},
 	std::pair<const char*, int>{"How far from the center the cursor needs to go before registering.", 1849})
@@ -1056,6 +1060,11 @@ void copy_control_info(control_info *dest_ci, control_info *src_ci, int control_
 
 void read_player_controls(object *objp, float frametime)
 {
+	// Photo mode controls the camera, not the player ship
+	if (game_is_photo_mode_active()) {
+		return;
+	}
+
 	float diff;
 	float target_warpout_speed;
 

@@ -1141,13 +1141,11 @@ void CFREDView::OnLButtonUp(UINT nFlags, CPoint point)
 							break;
 						}
 
-// Can't do player starts, since only player 1 is currently allowed to be in a wing
-
+						// Can't do player starts, since only player 1 is currently allowed to be in a wing
 						Assert(objp->type == OBJ_SHIP);
 						ship = objp->instance;
 						Assert(Ships[ship].wingnum == -1);
-						wing_bash_ship_name(Ships[ship].ship_name, Wings[Duped_wing].name,
-							Wings[Duped_wing].wave_count + 1);
+						wing_bash_ship_name(&Ships[ship], &Wings[Duped_wing], Wings[Duped_wing].wave_count + 1, true);
 
 						Wings[Duped_wing].ship_index[Wings[Duped_wing].wave_count] = ship;
 						Ships[ship].wingnum = Duped_wing;
@@ -2469,15 +2467,11 @@ int CFREDView::global_error_check()
 	object *ptr;
 	brief_stage *sp;
 	SCP_string anchor_message;
-	SCP_set<int> anchor_shipnums_checked;
+	SCP_set<anchor_t> anchors_checked;
 
 	g_err = multi = 0;
 	if ( The_mission.game_type & MISSION_TYPE_MULTI )
 		multi = 1;
-
-//	if (!stricmp(The_mission.name, "Untitled"))
-//		if (error("You haven't given this mission a title yet.\nThis is done from the Mission Specs Editor (Shift-N)."))
-//			return 1;
 
 	// cycle though all the objects and verify every possible aspect of them
 	obj_count = t = 0;
@@ -2663,13 +2657,13 @@ int CFREDView::global_error_check()
 			}
 
 			if (Ships[i].arrival_location != ArrivalLocation::AT_LOCATION) {
-				if (Ships[i].arrival_anchor < 0){
+				if (!Ships[i].arrival_anchor.isValid()){
 					if (error("Ship \"%s\" requires a valid arrival target", Ships[i].ship_name)){
 						return 1;
 					}
 				}
 				if (Ships[i].arrival_location == ArrivalLocation::FROM_DOCK_BAY) {
-					check_anchor_for_hangar_bay(anchor_message, anchor_shipnums_checked, Ships[i].arrival_anchor, Ships[i].ship_name, true, true);
+					check_anchor_for_hangar_bay(anchor_message, anchors_checked, Ships[i].arrival_anchor, Ships[i].ship_name, true, true);
 					if (!anchor_message.empty() && error("%s", anchor_message.c_str())) {
 						return 1;
 					}
@@ -2677,13 +2671,13 @@ int CFREDView::global_error_check()
 			}
 
 			if (Ships[i].departure_location != DepartureLocation::AT_LOCATION) {
-				if (Ships[i].departure_anchor < 0){
+				if (!Ships[i].departure_anchor.isValid()){
 					if (error("Ship \"%s\" requires a valid departure target", Ships[i].ship_name)){
 						return 1;
 					}
 				}
 				if (Ships[i].departure_location == DepartureLocation::TO_DOCK_BAY) {
-					check_anchor_for_hangar_bay(anchor_message, anchor_shipnums_checked, Ships[i].departure_anchor, Ships[i].ship_name, true, false);
+					check_anchor_for_hangar_bay(anchor_message, anchors_checked, Ships[i].departure_anchor, Ships[i].ship_name, true, false);
 					if (!anchor_message.empty() && error("%s", anchor_message.c_str())) {
 						return 1;
 					}
@@ -2852,7 +2846,7 @@ int CFREDView::global_error_check()
 				return internal_error("Number of waves for \"%s\" is negative", Wings[i].name);
 			}
 
-			if ((Wings[i].threshold < 0) || (Wings[i].threshold >= Wings[i].wave_count)){
+			if (Wings[i].threshold < 0){
 				return internal_error("Threshold for \"%s\" is invalid", Wings[i].name);
 			}
 
@@ -2880,11 +2874,11 @@ int CFREDView::global_error_check()
 			}
 
 			if (Wings[i].arrival_location != ArrivalLocation::AT_LOCATION) {
-				if (Wings[i].arrival_anchor < 0)
+				if (!Wings[i].arrival_anchor.isValid())
 					if (error("Wing \"%s\" requires a valid arrival target", Wings[i].name))
 						return 1;
 				if (Wings[i].arrival_location == ArrivalLocation::FROM_DOCK_BAY) {
-					check_anchor_for_hangar_bay(anchor_message, anchor_shipnums_checked, Wings[i].arrival_anchor, Wings[i].name, false, true);
+					check_anchor_for_hangar_bay(anchor_message, anchors_checked, Wings[i].arrival_anchor, Wings[i].name, false, true);
 					if (!anchor_message.empty() && error("%s", anchor_message.c_str())) {
 						return 1;
 					}
@@ -2892,11 +2886,11 @@ int CFREDView::global_error_check()
 			}
 
 			if (Wings[i].departure_location != DepartureLocation::AT_LOCATION) {
-				if (Wings[i].departure_anchor < 0)
+				if (!Wings[i].departure_anchor.isValid())
 					if (error("Wing \"%s\" requires a valid departure target", Wings[i].name))
 						return 1;
 				if (Wings[i].departure_location == DepartureLocation::TO_DOCK_BAY) {
-					check_anchor_for_hangar_bay(anchor_message, anchor_shipnums_checked, Wings[i].departure_anchor, Wings[i].name, false, false);
+					check_anchor_for_hangar_bay(anchor_message, anchors_checked, Wings[i].departure_anchor, Wings[i].name, false, false);
 					if (!anchor_message.empty() && error("%s", anchor_message.c_str())) {
 						return 1;
 					}
@@ -4213,9 +4207,14 @@ void CFREDView::OnEditorsBriefing()
 
 void CFREDView::OnEditorsDebriefing() 
 {
-	debriefing_editor_dlg dlg;
+	if (!Debriefing_dialog) {
+		Debriefing_dialog = new debriefing_editor_dlg;
+		Debriefing_dialog->create();
+	}
 
-	dlg.DoModal();
+	Debriefing_dialog->SetWindowPos(&wndTop, 0, 0, 0, 0,
+		SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE);
+	Debriefing_dialog->ShowWindow(SW_RESTORE);
 }
 
 void CFREDView::OnSaveCamera() 

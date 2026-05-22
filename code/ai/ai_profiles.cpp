@@ -42,6 +42,7 @@ void set_flag(ai_profile_t *profile, const char *name, AI::Profile_Flags flag)
 const char *AI_path_types[] = {
 	"normal",
 	"alt1",
+	"alt2",
 };
 
 int Num_ai_path_types = sizeof(AI_path_types)/sizeof(char*);
@@ -812,7 +813,7 @@ void ai_profiles_init()
 	Ai_profiles_initted = 1;
 }
 
-int ai_profile_lookup(char *name)
+int ai_profile_lookup(const char *name)
 {
 	for (int i = 0; i < Num_ai_profiles; i++)
 		if (!stricmp(name, Ai_profiles[i].profile_name))

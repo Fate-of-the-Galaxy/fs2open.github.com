@@ -17,6 +17,7 @@
 // AI Path types
 #define	AI_PATH_MODE_NORMAL 0
 #define	AI_PATH_MODE_ALT1	1
+#define AI_PATH_MODE_ALT2   2
 
 #define	AI_RANGE_AWARE_SEC_SEL_MODE_RETAIL 0
 #define	AI_RANGE_AWARE_SEC_SEL_MODE_AWARE 1
@@ -164,6 +165,6 @@ extern ai_profile_t Ai_profiles[MAX_AI_PROFILES];
 
 void ai_profiles_init();
 
-int ai_profile_lookup(char *name);
+int ai_profile_lookup(const char *name);
 
 #endif

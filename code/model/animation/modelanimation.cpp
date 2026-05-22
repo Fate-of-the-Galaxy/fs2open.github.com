@@ -202,7 +202,7 @@ namespace animation {
 
 				auto thisPtr = shared_from_this();
 
-				animEntry.animationList.push_back(thisPtr);
+				animEntry.animationList.push_back(std::move(thisPtr));
 			}
 
 			/* fall-thru */
@@ -420,7 +420,8 @@ namespace animation {
 	}
 
 	void ModelAnimationSubmodel::reset(polymodel_instance* pmi) {
-		if(!m_submodel)
+		auto cache_it = m_submodel.find(pmi->model_num);
+		if (cache_it == m_submodel.end())
 			findSubmodel(pmi);
 
 		auto dataIt = m_initialData.find({ pmi->id });
@@ -515,8 +516,9 @@ namespace animation {
 		polymodel* pm = model_get(pmi->model_num);
 
 		//Do we have a submodel number already cached?
-		if (m_submodel)
-			submodelNumber = *m_submodel;
+		auto cache_it = m_submodel.find(pm->id);
+		if (cache_it != m_submodel.end())
+			submodelNumber = cache_it->second;
 		//We seem to have a submodel name
 		else {
 			for (int i = 0; i < pm->n_models; i++) {
@@ -526,7 +528,7 @@ namespace animation {
 				}
 			}
 
-			m_submodel = submodelNumber;
+			m_submodel.emplace(pm->id, submodelNumber);
 		}
 
 		//If the model does not exist, return null. The system is expected to just silently tolerate this,
@@ -559,11 +561,12 @@ namespace animation {
 		polymodel* pm = model_get(pmi->model_num);
 
 		//Do we have a submodel number already cached?
-		if (m_submodel)
-			submodelNumber = *m_submodel;
+		auto cache_it = m_submodel.find(pm->id);
+		if (cache_it != m_submodel.end())
+			submodelNumber = cache_it->second;
 		//Do we know if we were told to find the barrel submodel or not? This implies we have a subsystem name, not a submodel name
 		else {
-			ship_info* sip = nullptr;
+			const ship_info* sip = nullptr;
 			if (pmi->objnum >= 0) {
 				sip = &Ship_info[Ships[Objects[pmi->objnum].instance].ship_info_index];
 			}
@@ -579,7 +582,7 @@ namespace animation {
 
 			for (int i = 0; i < sip->n_subsystems; i++) {
 				if (!subsystem_stricmp(sip->subsystems[i].subobj_name, m_name.c_str())) {
-					if ((bool)m_findBarrel) {
+					if (m_findBarrel) {
 						//Check if the barrel subobj is a dedicated existing subobj or just the base turret.
 						if (sip->subsystems[i].turret_gun_sobj != sip->subsystems[i].subobj_num)
 							submodelNumber = sip->subsystems[i].turret_gun_sobj;
@@ -592,7 +595,7 @@ namespace animation {
 				}
 			}
 
-			m_submodel = submodelNumber;
+			m_submodel.emplace(pm->id, submodelNumber);
 		}
 
 		//If the model does not exist, return null. The system is expected to just silently tolerate this,
@@ -682,21 +685,21 @@ namespace animation {
 
 		for (const auto& submodel : other.m_submodels) {
 			auto newSubmodel = std::shared_ptr<ModelAnimationSubmodel>(submodel->copy());
-			newSubmodel->m_submodel = std::nullopt;
-			m_submodels.push_back(newSubmodel);
+			newSubmodel->m_submodel = {};
+			m_submodels.push_back(std::move(newSubmodel));
 		}
 
 		for (const auto& animationTypes : other.m_animationSet) {
 			auto& newAnimations = m_animationSet[animationTypes.first];
 			for (const auto& oldAnimations : animationTypes.second) {
 				for (const auto& oldAnimation : oldAnimations.second) {
-					std::shared_ptr<ModelAnimation> newAnimation = std::shared_ptr<ModelAnimation>(new ModelAnimation(*oldAnimation));
+					std::shared_ptr<ModelAnimation> newAnimation = std::make_shared<ModelAnimation>(*oldAnimation);
 					newAnimation->m_animation = std::shared_ptr<ModelAnimationSegment>(newAnimation->m_animation->copy());
 
 					newAnimation->m_animation->exchangeSubmodelPointers(*this);
 					newAnimation->m_set = this;
 
-					newAnimations[oldAnimations.first].push_back(newAnimation);
+					newAnimations[oldAnimations.first].push_back(std::move(newAnimation));
 				}
 			}
 		}
@@ -707,7 +710,7 @@ namespace animation {
 	}
 
 	std::shared_ptr<ModelAnimation> ModelAnimationSet::emplace(const std::shared_ptr<ModelAnimation>& animation, const SCP_string& request, const SCP_string& name, ModelAnimationTriggerType type, int subtype, unsigned int uniqueId) {
-		auto newAnim = std::shared_ptr<ModelAnimation>(new ModelAnimation(*animation));
+		auto newAnim = std::make_shared<ModelAnimation>(*animation);
 		newAnim->m_set = this;
 		newAnim->m_animation = std::shared_ptr<ModelAnimationSegment>(animation->m_animation->copy());
 		newAnim->m_animation->exchangeSubmodelPointers(*this);
@@ -1245,11 +1248,11 @@ namespace animation {
 
 		switch (turretStatus) {
 		case 0: //Submodel
-			return std::shared_ptr<ModelAnimationSubmodel>(new ModelAnimationSubmodel(name));
+			return std::make_shared<ModelAnimationSubmodel>(name);
 		case 1: //Turret Base
-			return std::shared_ptr<ModelAnimationSubmodel>(new ModelAnimationSubmodelTurret(name, false, ""));
+			return std::make_shared<ModelAnimationSubmodelTurret>(name, false, "");
 		case 2: //Turret Arm
-			return std::shared_ptr<ModelAnimationSubmodel>(new ModelAnimationSubmodelTurret(name, true, ""));
+			return std::make_shared<ModelAnimationSubmodelTurret>(name, true, "");
 		default: //Not specified
 			return nullptr;
 		}
@@ -1282,7 +1285,7 @@ namespace animation {
 			return;
 		}
 
-		auto animation = std::shared_ptr<ModelAnimation>(new ModelAnimation(type == ModelAnimationTriggerType::Initial));
+		auto animation = std::make_shared<ModelAnimation>(type == ModelAnimationTriggerType::Initial);
 		
 		int subtype = ModelAnimationSet::SUBTYPE_DEFAULT;
 		SCP_string name;
@@ -1487,7 +1490,7 @@ namespace animation {
 						curve = Curves[curve_id];
 				}
 
-				driver = [remap_driver_source, curve](ModelAnimation &, ModelAnimation::instance_data &instance, polymodel_instance *pmi, float) {
+				driver = [remap_driver_source = std::move(remap_driver_source), curve](ModelAnimation &, ModelAnimation::instance_data &instance, polymodel_instance *pmi, float) {
 					float oldFrametime = instance.time;
 					instance.time = curve ? curve->GetValue(remap_driver_source(pmi)) : remap_driver_source(pmi);
 					CLAMP(instance.time, 0.0f, instance.duration);
@@ -1512,7 +1515,7 @@ namespace animation {
 						curve = Curves[curve_id];
 				}
 
-				propertyDrivers.emplace_back([driver_source, curve, target](ModelAnimation &, ModelAnimation::instance_data &instance, polymodel_instance *pmi) {
+				propertyDrivers.emplace_back([driver_source = std::move(driver_source), curve, target](ModelAnimation &, ModelAnimation::instance_data &instance, polymodel_instance *pmi) {
 					float& property = instance.*(target.target);
 					property = curve ? curve->GetValue(driver_source(pmi)) : driver_source(pmi);
 					if(target.clamp) {
@@ -1538,7 +1541,7 @@ namespace animation {
 						curve = Curves[curve_id];
 				}
 
-				startupDrivers.emplace_back([driver_source, curve, target](ModelAnimation &, ModelAnimation::instance_data &instance, polymodel_instance *pmi) {
+				startupDrivers.emplace_back([driver_source = std::move(driver_source), curve, target](ModelAnimation &, ModelAnimation::instance_data &instance, polymodel_instance *pmi) {
 					float& property = instance.*(target.target);
 					property = curve ? curve->GetValue(driver_source(pmi)) : driver_source(pmi);
 					if(target.clamp) {
@@ -1673,7 +1676,7 @@ namespace animation {
 			if (optional_string("+time:"))
 				skip_token();
 
-			auto anim = std::shared_ptr<ModelAnimation>(new ModelAnimation(true));
+			auto anim = std::make_shared<ModelAnimation>(true);
 
 			char namelower[MAX_NAME_LEN];
 			strncpy(namelower, sp->subobj_name, MAX_NAME_LEN);
@@ -1682,12 +1685,12 @@ namespace animation {
 			//sadly, we also need to check for engine and radar, since these take precedent (as in, an engineturret is an engine before a turret type)
 			if (!strstr(namelower, "engine") && !strstr(namelower, "radar") && strstr(namelower, "turret")) {
 				auto subsysBase = sip->animations.getSubmodel(sp->subobj_name, sip->name, false);
-				auto rotBase = std::shared_ptr<ModelAnimationSegmentSetAngle>(new ModelAnimationSegmentSetAngle(std::move(subsysBase), angle.h));
+				auto rotBase = std::make_shared<ModelAnimationSegmentSetAngle>(std::move(subsysBase), angle.h);
 
 				auto subsysBarrel = sip->animations.getSubmodel(sp->subobj_name, sip->name, true);
-				auto rotBarrel = std::shared_ptr<ModelAnimationSegmentSetAngle>(new ModelAnimationSegmentSetAngle(std::move(subsysBarrel), angle.p));
+				auto rotBarrel = std::make_shared<ModelAnimationSegmentSetAngle>(std::move(subsysBarrel), angle.p);
 
-				auto rot = std::shared_ptr<ModelAnimationSegmentParallel>(new ModelAnimationSegmentParallel());
+				auto rot = std::make_shared<ModelAnimationSegmentParallel>();
 				rot->addSegment(std::move(rotBase));
 				rot->addSegment(std::move(rotBarrel));
 
@@ -1704,7 +1707,7 @@ namespace animation {
 			sip->animations.emplace(anim, name, name, ModelAnimationTriggerType::Initial, ModelAnimationSet::SUBTYPE_DEFAULT, ModelAnimationParseHelper::getUniqueAnimationID(name + Animation_types.at(ModelAnimationTriggerType::Initial).first + std::to_string(subtype), 'b', sip->name));
 		}
 		else {
-			auto anim = std::shared_ptr<ModelAnimation>(new ModelAnimation());
+			auto anim = std::make_shared<ModelAnimation>();
 			auto subsys = sip->animations.getSubmodel(sp->subobj_name);
 
 			if (type == ModelAnimationTriggerType::TurretFired) {
@@ -1712,12 +1715,12 @@ namespace animation {
 				anim->m_flags += Animation_Flags::Reset_at_completion;
 			}
 
-			auto mainSegment = std::shared_ptr<ModelAnimationSegmentSerial>(new ModelAnimationSegmentSerial());
+			auto mainSegment = std::make_shared<ModelAnimationSegmentSerial>();
 
 			if (optional_string("+delay:")) {
 				int delayByMs;
 				stuff_int(&delayByMs);
-				auto delay = std::shared_ptr<ModelAnimationSegmentWait>(new ModelAnimationSegmentWait(((float)delayByMs) * 0.001f));
+				auto delay = std::make_shared<ModelAnimationSegmentWait>(((float)delayByMs) * 0.001f);
 				mainSegment->addSegment(delay);
 			}
 
@@ -1782,14 +1785,14 @@ namespace animation {
 				required_string("+Radius:");
 				stuff_float(&snd_rad);
 
-				auto sound = std::shared_ptr<ModelAnimationSegmentSoundDuring>(new ModelAnimationSegmentSoundDuring(rotation, start_sound, end_sound, loop_sound, true));
+				auto sound = std::make_shared<ModelAnimationSegmentSoundDuring>(rotation, start_sound, end_sound, loop_sound, true);
 				mainSegment->addSegment(sound);
 			}
 			else
 				mainSegment->addSegment(rotation);
 
 			if (delayByMsReverse != -1) {
-				auto delay = std::shared_ptr<ModelAnimationSegmentWait>(new ModelAnimationSegmentWait(((float)delayByMsReverse) * 0.001f));
+				auto delay = std::make_shared<ModelAnimationSegmentWait>(((float)delayByMsReverse) * 0.001f);
 				mainSegment->addSegment(delay);
 			}
 
@@ -1813,6 +1816,7 @@ namespace animation {
 		{"$Axis Rotation:", 	ModelAnimationSegmentAxisRotation::parser},
 		{"$Translation:", 		ModelAnimationSegmentTranslation::parser},
 		{"$Sound During:", 		ModelAnimationSegmentSoundDuring::parser},
+		{"$Particles During:", 		ModelAnimationSegmentParticlesDuring::parser},
 		{"$Inverse Kinematics:", 	ModelAnimationSegmentIK::parser}
 	};
 	

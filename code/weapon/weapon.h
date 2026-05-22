@@ -35,6 +35,8 @@
 
 #include "utils/modular_curves.h"
 
+#include <optional>
+
 class object;
 class ship_subsys;
 
@@ -386,6 +388,8 @@ struct weapon_info
 
 	vec3d	closeup_pos;						// position for camera to set an offset for viewing the weapon model
 	float	closeup_zoom;						// zoom when using weapon model in closeup view in loadout selection
+	std::optional<vec3d> icon_closeup_pos;		// icon-specific position for camera for viewing the weapon model
+	std::optional<float> icon_closeup_zoom;	// icon-specific zoom for viewing the weapon model
 
 	char hud_filename[MAX_FILENAME_LEN];			//Name of image to display on HUD in place of text
 	int hud_image_index;					//teh index of the image
@@ -1085,6 +1089,16 @@ bool weapon_multilock_can_lock_on_target(object* shooter, object* target_objp, w
 
 // Return whether the weapon has a target it is currently homing on
 bool weapon_has_homing_object(weapon* wp);
+
+// Variant type for weapon stat values: numeric, boolean, or string
+using weapon_stat_value = std::variant<float, bool, SCP_string>;
+
+// Returns a map of combat stats for a single weapon (keyed by column name).
+// Works for any weapon type (primary, secondary, beam).
+SCP_map<SCP_string, weapon_stat_value> weapon_get_stats(const weapon_info &wi);
+
+// Returns MediaVP-style human-readable text block for a single weapon.
+SCP_string weapon_get_stats_text(const weapon_info &wi);
 
 
 #endif

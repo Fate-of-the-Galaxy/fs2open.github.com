@@ -25,6 +25,7 @@
 #include "sound/sound.h"
 #include "mission/mission_flags.h"
 #include "nebula/volumetrics.h"
+#include "ship/anchor_t.h"
 #include "stats/scoring.h"
 
 //WMC - This should be here
@@ -40,16 +41,11 @@ enum class DepartureLocation;
 
 #define DEFAULT_AMBIENT_LIGHT_LEVEL			0x00787878
 
-// arrival anchor types
-// mask should be high enough to avoid conflicting with ship anchors
-#define SPECIAL_ARRIVAL_ANCHOR_FLAG				0x1000
-#define SPECIAL_ARRIVAL_ANCHOR_PLAYER_FLAG		0x0100
-
 #define MIN_TARGET_ARRIVAL_DISTANCE             500.0f // float because that's how FRED does the math
 #define MIN_TARGET_ARRIVAL_MULTIPLIER           2.0f // minimum distance is 2 * target radius, but at least 500
 
-int get_special_anchor(const char *name);
-void check_anchor_for_hangar_bay(SCP_string &message, SCP_set<int> &anchor_shipnums_checked, int anchor_shipnum, const char *other_name, bool other_is_ship, bool is_arrival);
+anchor_t get_special_anchor(const char *name);
+void check_anchor_for_hangar_bay(SCP_string &message, SCP_set<anchor_t> &anchors_checked, anchor_t anchor, const char *other_name, bool other_is_ship, bool is_arrival);
 
 // MISSION_VERSION should be the earliest version of FSO that can load the current mission format without
 // requiring version-specific comments.  It should be updated whenever the format changes, but it should
@@ -70,6 +66,7 @@ extern bool check_for_25_1_data();
 #define MPF_ONLY_MISSION_INFO	(1 << 0)
 #define MPF_IMPORT_FSM			(1 << 1)
 #define MPF_FAST_RELOAD			(1 << 2)	// skip clearing some stuff so we can load the mission faster (usually since it's the same mission)
+#define MPF_IS_TEMPLATE			(1 << 3)	// loading a .fst mission template; post-load reset of name, author, timestamps, notes, description, and camera
 
 // bitfield definitions for missions game types
 #define OLD_MAX_GAME_TYPES				4					// needed for compatibility
@@ -102,19 +99,22 @@ inline const std::vector<std::pair<SCP_string, int>> Mission_event_teams_tvt = [
 }();
 
 // Goober5000
-typedef struct support_ship_info {
-	ArrivalLocation		arrival_location;				// arrival location
-	int		arrival_anchor;					// arrival anchor
-	DepartureLocation	departure_location;				// departure location
-	int		departure_anchor;				// departure anchor
-	float	max_hull_repair_val;			// % of a ship's hull that can be repaired -C
-	float	max_subsys_repair_val;			// same thing, except for subsystems -C
-	int		max_support_ships;				// max number of consecutive support ships
-	int		max_concurrent_ships;			// max number of concurrent support ships in mission per team
-	int		ship_class;						// ship class of support ship
-	int		tally;							// number of support ships so far
-	int		support_available_for_species;	// whether support is available for a given species (this is a bitfield)
-} support_ship_info;
+struct support_ship_info
+{
+	ArrivalLocation     arrival_location;   // arrival location
+	anchor_t            arrival_anchor;     // arrival anchor
+	DepartureLocation   departure_location; // departure location
+	anchor_t            departure_anchor;   // departure anchor
+	float   max_hull_repair_val;            // % of a ship's hull that can be repaired -C
+	float   max_subsys_repair_val;          // same thing, except for subsystems -C
+	int     max_support_ships;              // max number of consecutive support ships
+	int     max_concurrent_ships;           // max number of concurrent support ships in mission per team
+	int     ship_class;                     // ship class of support ship
+	int     tally;                          // number of support ships so far
+	int     support_available_for_species;  // whether support is available for a given species (this is a bitfield)
+
+	void reset();
+};
 
 // movie type defines
 // If you add one here, you must also add a description to missioncutscenedlg.cpp for FRED
@@ -185,7 +185,7 @@ struct parse_object_flag_description {
 };
 
 typedef struct mission {
-	char	name[NAME_LENGTH];
+	SCP_string	name;
 	SCP_string	author;
 	gameversion::version	required_fso_version;
 	char	created[DATE_TIME_LENGTH];
@@ -207,9 +207,8 @@ typedef struct mission {
 	char	envmap_name[MAX_FILENAME_LEN];
 	int		skybox_flags;
 	int		contrail_threshold;
+	int		large_ship_no_collide_collision_group;
 	int		ambient_light_level;
-	float	neb_far_multi;
-	float	neb_near_multi;
 	std::optional<volumetric_nebula> volumetrics;
 	sound_env	sound_environment;
 	vec3d   gravity;
@@ -237,6 +236,7 @@ typedef struct mission {
 	SCP_map<SCP_string, SCP_string> custom_data;
 
 	SCP_vector<custom_string> custom_strings;
+	SCP_vector<SCP_string> fred_layers;
 
 	void Reset( );
 
@@ -314,6 +314,7 @@ extern const char *Reinforcement_type_names[];
 extern flag_def_list_new<Mission::Mission_Flags> Parse_mission_flags[];
 extern parse_object_flag_description<Mission::Mission_Flags> Parse_mission_flag_descriptions[];
 extern const size_t Num_parse_mission_flags;
+extern const size_t Num_parse_mission_flag_descriptions;
 extern char *Object_flags[];
 extern flag_def_list_new<Ship::Ship_Flags> Parse_ship_flags[];
 extern const size_t Num_Parse_ship_flags;
@@ -327,9 +328,11 @@ extern const size_t Num_parse_object_flags;
 extern flag_def_list_new<Ship::Wing_Flags> Parse_wing_flags[];
 extern parse_object_flag_description<Ship::Wing_Flags> Parse_wing_flag_descriptions[];
 extern const size_t Num_parse_wing_flags;
+extern const size_t Num_parse_wing_flag_descriptions;
 extern flag_def_list_new<Mission::Parse_Object_Flags> Parse_prop_flags[];
 extern parse_object_flag_description<Mission::Parse_Object_Flags> Parse_prop_flag_descriptions[];
 extern const size_t Num_parse_prop_flags;
+extern const size_t Num_parse_prop_flag_descriptions;
 extern const char *Icon_names[];
 extern const char *Mission_event_log_flags[];
 
@@ -448,13 +451,13 @@ public:
 
 	ArrivalLocation arrival_location = ArrivalLocation::AT_LOCATION;
 	int	arrival_distance = 0;					// used when arrival location is near or in front of some ship
-	int	arrival_anchor = -1;						// ship used for anchoring an arrival point
+	anchor_t arrival_anchor = anchor_t::invalid();	// ship registry entry used for anchoring an arrival point
 	int arrival_path_mask = 0;					// Goober5000
 	int	arrival_cue = -1;				//	Index in Sexp_nodes of this sexp.
 	int	arrival_delay = 0;
 
 	DepartureLocation departure_location = DepartureLocation::AT_LOCATION;
-	int	departure_anchor = -1;
+	anchor_t departure_anchor = anchor_t::invalid();
 	int departure_path_mask = 0;				// Goober5000
 	int	departure_cue = -1;			//	Index in Sexp_nodes of this sexp.
 	int	departure_delay = 0;
@@ -477,6 +480,7 @@ public:
 	object *created_object = nullptr;					// Goober5000
 	int collision_group_id = 0;							// Goober5000
 	int	group = -1;								// group object is within or -1 if none.
+	SCP_string fred_layer = "Default";
 	int	persona_index = -1;
 	int	kamikaze_damage = 0;					// base damage for a kamikaze attack
 
@@ -562,6 +566,11 @@ extern matrix Parse_viewer_orient;
 extern fix Mission_end_time;
 
 extern SCP_vector<SCP_string> Parse_names;
+
+// Populated when Qtfred_running and a parse-time auto-correction fires. Drained by
+// QtFRED's ErrorChecker so the corrections are visible to the designer instead of
+// silently buried. Outside of QtFRED these sites still call Warning(LOCATION, ...).
+extern SCP_vector<SCP_string> Mission_parse_warnings;
 
 extern char			Player_start_shipname[NAME_LENGTH];
 extern int			Player_start_shipnum;

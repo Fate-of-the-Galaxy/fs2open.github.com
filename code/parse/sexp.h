@@ -653,7 +653,9 @@ enum : int {
 	OP_ROTATING_SUBSYS_SET_TURN_TIME,	// Goober5000
 	OP_PLAYER_USE_AI,	// Goober5000
 	OP_PLAYER_NOT_USE_AI,	// Goober5000
-	
+	OP_SET_PLAYER_TARGET, // LuytenKy
+	OP_CLEAR_PLAYER_TARGET, // LuytenKy
+
 	OP_HUD_DISABLE_EXCEPT_MESSAGES,	// Goober5000
 	OP_FORCE_JUMP,	// Goober5000
 	OP_HUD_SET_TEXT, //WMC
@@ -686,6 +688,7 @@ enum : int {
 	OP_CUTSCENES_SET_TIME_COMPRESSION,	// WMC
 	OP_CUTSCENES_RESET_TIME_COMPRESSION,	// WMC
 	OP_CUTSCENES_FORCE_PERSPECTIVE,	// WMC
+	OP_ALLOW_PHOTO_MODE,
 	OP_JUMP_NODE_SET_JUMPNODE_NAME,	// CommanderDJ
 	OP_JUMP_NODE_SET_JUMPNODE_DISPLAY_NAME,
 	OP_JUMP_NODE_SET_JUMPNODE_COLOR,	// WMC
@@ -695,6 +698,7 @@ enum : int {
 	OP_JUMP_NODE_HIDE_JUMPNODE,	// WMC
 	OP_SHIP_GUARDIAN_THRESHOLD,	// Goober5000
 	OP_SHIP_SUBSYS_GUARDIAN_THRESHOLD,	// Goober5000
+	OP_SET_GUARD_RANGE, //MjnMixael
 	OP_SET_SKYBOX_MODEL, // taylor
 	OP_SHIP_CREATE,
 	OP_PROP_CREATE,     // MjnMixael
@@ -1108,7 +1112,7 @@ enum class sexp_mode
 #define SEXP_ATOM				2
 
 // flags for sexpressions -- masked onto the end of the type field
-#define SEXP_FLAG_PERSISTENT				(1<<31)		// should this sexp node be persistant across missions
+#define SEXP_FLAG_PERSISTENT				(1<<31)		// should this sexp node be kept across missions, i.e. not freed -- note, NOT the same as variable/container persistence
 #define SEXP_FLAG_VARIABLE					(1<<30)
 
 // sexp variable definitions
@@ -1132,6 +1136,18 @@ enum class sexp_mode
 #define SEXP_VARIABLE_NETWORK				(1<<28)
 #define SEXP_VARIABLE_SAVE_TO_PLAYER_FILE	(1<<27)
 
+// There are three types of persistence for variables and containers:
+// 1. No persistence: the value is only kept for the duration of a mission's gameplay
+// 2. Campaign-persistence: the value is scoped to a campaign, and has no value outside the campaign
+// 3. Player-persistence: the value is scoped to the player/pilot file, and can be referenced in any campaign
+// And there are two ways that persistent variables/containers are saved:
+// 1. When the mission progresses with an outcome that is "accepted" by the player
+// 2. When the mission closes in any way (progress, quit, restart)
+// So, there can be four combinations of persistence (campaign/player times progress/close).  When persistent variables
+// were first implemented, there was an assumption that player-persistence implied save-on-close, and that
+// campaign-persistence implied save-on-progress, and the original mission parsing code reflects that.  But after the
+// 2018 rework, either type can be used with either save.  The 2018 rework also introduced new terminology:
+// "eternal" means player-persistent, and "non-eternal" means campaign-persistent.
 #define SEXP_VARIABLE_IS_PERSISTENT (SEXP_VARIABLE_SAVE_ON_MISSION_PROGRESS|SEXP_VARIABLE_SAVE_ON_MISSION_CLOSE)
 
 #define BLOCK_EXP_SIZE					6
@@ -1517,7 +1533,6 @@ bool sexp_replace_variable_names_with_values(char *text, int max_len);	// Goober
 bool sexp_replace_variable_names_with_values(SCP_string &text);	// Goober5000
 int get_nth_variable_index(int nth, int variable_type);	// Karajorma
 int sexp_variable_count();
-int sexp_campaign_file_variable_count();	// Goober5000
 int sexp_variable_typed_count(int sexp_variables_index, int variable_type); // Karajorma
 void sexp_variable_delete(int index);
 void sexp_variable_sort();

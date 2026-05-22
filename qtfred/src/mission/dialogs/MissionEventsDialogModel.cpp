@@ -5,6 +5,29 @@
 
 namespace fso::fred::dialogs {
 
+SCP_vector<SCP_string> MissionEventsDialogModel::s_extra_head_anis;
+
+void MissionEventsDialogModel::addExtraHeadAni(const SCP_string& name)
+{
+	if (name.empty() || lcase_equal(name, "<none>") || lcase_equal(name, "none")) {
+		return;
+	}
+	auto it = std::find(s_extra_head_anis.begin(), s_extra_head_anis.end(), name);
+	if (it == s_extra_head_anis.end()) {
+		s_extra_head_anis.push_back(name);
+	}
+}
+
+void MissionEventsDialogModel::clearBrowsedHeadAnis()
+{
+	s_extra_head_anis.clear();
+}
+
+const SCP_vector<SCP_string>& MissionEventsDialogModel::getExtraHeadAnis()
+{
+	return s_extra_head_anis;
+}
+
 MissionEventsDialogModel::MissionEventsDialogModel(QObject* parent, fso::fred::EditorViewport* viewport, IEventTreeOps& tree_ops)
 	: AbstractDialogModel(parent, viewport), m_event_tree_ops(tree_ops)
 {
@@ -92,6 +115,7 @@ void MissionEventsDialogModel::initializeData()
 
 	initializeTeamList();
 	initializeEvents();
+	_modified = false;
 }
 
 void MissionEventsDialogModel::initializeEvents()
@@ -371,11 +395,20 @@ void MissionEventsDialogModel::initializeHeadAniList()
 		m_head_ani_list.emplace_back(thisHead);
 	}
 
+	// Include any anis discovered during this session
+	for (const auto& extra : s_extra_head_anis) {
+		auto it = std::find(m_head_ani_list.begin(), m_head_ani_list.end(), extra);
+		if (it == m_head_ani_list.end()) {
+			m_head_ani_list.emplace_back(extra);
+		}
+	}
+
+	// Scan the current mission's messages. Any head ANI not already in the list is added to the list
 	for (auto& msg : m_messages) {
 		if (msg.avi_info.name) {
 			auto it = std::find(m_head_ani_list.begin(), m_head_ani_list.end(), msg.avi_info.name);
 			if (it == m_head_ani_list.end()) {
-				m_head_ani_list.emplace_back(msg.avi_info.name);
+				addExtraHeadAni(msg.avi_info.name);
 			}
 		}
 	}
@@ -647,7 +680,7 @@ void MissionEventsDialogModel::insertEvent()
 	m_sig.insert(m_sig.begin() + pos, -1);
 	auto& event = m_events[pos];
 
-	// Place after the previous root if it exists and is valid; otherwise we’ll fix index explicitly
+	// Place after the previous root if it exists and is valid; otherwise we'll fix index explicitly
 	int after = (pos > 0 && m_events[pos - 1].formula >= 0) ? m_events[pos - 1].formula : -1;
 
 	event.formula = m_event_tree_ops.build_default_root(event.name, after);
@@ -809,6 +842,28 @@ void MissionEventsDialogModel::setChainDelay(int delay)
 		delay = 0;
 	}
 	modify(event.chain_delay, delay);
+}
+
+bool MissionEventsDialogModel::getUseMsecs() const
+{
+	if (!SCP_vector_inbounds(m_events, m_cur_event)) {
+		return false;
+	}
+	return (m_events[m_cur_event].flags & MEF_USE_MSECS) != 0;
+}
+
+void MissionEventsDialogModel::setUseMsecs(bool useMsecs)
+{
+	if (!SCP_vector_inbounds(m_events, m_cur_event)) {
+		return;
+	}
+	auto& event = m_events[m_cur_event];
+	if (useMsecs) {
+		event.flags |= MEF_USE_MSECS;
+	} else {
+		event.flags &= ~MEF_USE_MSECS;
+	}
+	set_modified();
 }
 
 int MissionEventsDialogModel::getEventScore() const

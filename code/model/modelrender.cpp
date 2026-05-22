@@ -11,7 +11,10 @@
 
 #include "asteroid/asteroid.h"
 #include "cmdline/cmdline.h"
+#include "decals/decals.h"
 #include "gamesequence/gamesequence.h"
+#include "globalincs/systemvars.h"
+#include "math/floating.h"
 #include "graphics/light.h"
 #include "graphics/matrix.h"
 #include "graphics/shadows.h"
@@ -223,7 +226,7 @@ void model_render_params::set_replacement_textures(std::shared_ptr<const model_t
 
 void model_render_params::set_replacement_textures(int modelnum, const SCP_vector<texture_replace>& replacement_textures)
 {
-	auto textures = make_shared<model_texture_replace>();
+	auto textures = std::make_shared<model_texture_replace>();
 
 	polymodel* pm = model_get(modelnum);
 
@@ -1293,7 +1296,7 @@ void model_render_children_buffers(model_draw_list* scene, model_material *rende
 	if ( (model_flags & MR_SHOW_OUTLINE || model_flags & MR_SHOW_OUTLINE_HTL || model_flags & MR_SHOW_OUTLINE_PRESET) && 
 		sm->outline_buffer != nullptr ) {
 		color outline_color = interp->get_color();
-		scene->add_outline(sm->outline_buffer, sm->n_verts_outline, &outline_color);
+		scene->add_outline(sm->outline_buffer.get(), sm->n_verts_outline, &outline_color);
 	} else {
 		if ( trans_buffer && sm->trans_buffer.flags & VB_FLAG_TRANS ) {
 			model_render_buffers(scene, rendering_material, interp, &sm->trans_buffer, pm, mn, detail_level, tmap_flags);
@@ -2618,6 +2621,10 @@ void model_render_debug(int model_num, const matrix *orient, const vec3d *pos, u
 		model_draw_bay_paths_htl(model_num);
 	}
 
+	if ( debug_flags & MR_DEBUG_DOCK_POINTS ) {
+		model_draw_dock_points_htl(model_num);
+	}
+
 	if ( (flags & MR_AUTOCENTER) && (set_autocen) ) {
 		g3_done_instance(true);
 	}
@@ -2932,7 +2939,7 @@ void model_render_queue(const model_render_params* interp, model_draw_list* scen
 
 		if ( (is_outlines_only || is_outlines_only_htl) && pm->submodel[detail_model_num].outline_buffer != NULL ) {
 			color outline_color = interp->get_color();
-			scene->add_outline(pm->submodel[detail_model_num].outline_buffer, pm->submodel[detail_model_num].n_verts_outline, &outline_color);
+			scene->add_outline(pm->submodel[detail_model_num].outline_buffer.get(), pm->submodel[detail_model_num].n_verts_outline, &outline_color);
 		} else {
 			model_render_buffers(scene, &rendering_material, interp, &pm->submodel[detail_model_num].buffer, pm, detail_model_num, detail_level, tmap_flags);
 
@@ -2980,7 +2987,30 @@ void model_render_queue(const model_render_params* interp, model_draw_list* scen
 
 	// MARKED!
 	if ( !( model_flags & MR_NO_TEXTURING ) && !( model_flags & MR_NO_INSIGNIA) ) {
-		scene->add_insignia(interp, pm, detail_level, interp->get_insignia_bitmap());
+		int bitmap_num = interp->get_insignia_bitmap();
+		if ( Render_insignias_as_decals && objnum >= 0 && (pm->num_ins > 0) && (bitmap_num >= 0) ) {
+			for (int ins_idx = 0; ins_idx < pm->num_ins; ins_idx++) {
+				const insignia& ins = pm->ins[ins_idx];
+				// skip insignias not on our detail level
+				if (ins.detail_level != detail_level) {
+					continue;
+				}
+
+				decals::Decal decal;
+				decal.object = &Objects[objnum];
+				decal.position = ins.position;
+				decal.submodel = -1;
+				decal.scale = vec3d{{{ins.diameter, ins.diameter, ins.diameter}}};
+				decal.orig_obj_type = OBJ_SHIP;
+				decal.creation_time = f2fl(Missiontime);
+				decal.lifetime = 1.0f;
+				decal.orientation = ins.orientation;
+				decal.definition_handle = std::make_tuple(bitmap_num, -1, -1);
+				decals::addSingleFrameDecal(std::move(decal));
+			}
+		} else {
+			scene->add_insignia(interp, pm, detail_level, bitmap_num);
+		}
 	}
 
 	if ( (model_flags & MR_AUTOCENTER) && (set_autocen) ) {
@@ -3099,7 +3129,7 @@ void modelinstance_replace_active_texture(polymodel_instance* pmi, const char* o
 			texture = bm_load_either(new_name);
 
 		if (pmi->texture_replace == nullptr) {
-			pmi->texture_replace = make_shared<model_texture_replace>();
+			pmi->texture_replace = std::make_shared<model_texture_replace>();
 		}
 
 		(*pmi->texture_replace)[final_index] = texture;
@@ -3109,7 +3139,7 @@ void modelinstance_replace_active_texture(polymodel_instance* pmi, const char* o
 
 // renders a model as if in the tech room or briefing UI
 // model_type 1 for ship class, 2 for weapon class, 3 for pof
-bool render_tech_model(tech_render_type model_type, int x1, int y1, int x2, int y2, float zoom, bool lighting, int class_idx, const matrix* orient, const SCP_string &pof_filename, float close_zoom, const vec3d *close_pos, const SCP_string& tcolor)
+bool render_tech_model(tech_render_type model_type, int x1, int y1, int x2, int y2, float zoom, bool lighting, int class_idx, const matrix* orient, const SCP_string &pof_filename, float close_zoom, const vec3d *close_pos, const SCP_string& tcolor, const SCP_vector<SCP_string>& destroyed_subsystems)
 {
 
 	lighting_profiles::set_non_mission_profile non_mission_lighting_profile;
@@ -3225,8 +3255,33 @@ bool render_tech_model(tech_render_type model_type, int x1, int y1, int x2, int 
 
 	// Create an instance for ships that can be used to clear out destroyed subobjects from rendering
 	if (model_type == TECH_SHIP) {
+		auto sip = &Ship_info[class_idx];
+		auto pm = model_get(model_num);
 		model_instance = model_create_instance(model_objnum_special::OBJNUM_NONE, model_num);
-		model_set_up_techroom_instance(&Ship_info[class_idx], model_instance);
+		model_set_up_techroom_instance(sip, model_instance);
+
+		if (!destroyed_subsystems.empty()) {
+			auto pmi = model_get_instance(model_instance);
+			flagset<Ship::Subsystem_Flags> empty;
+
+			for (int idx = 0; idx < sip->n_subsystems; ++idx) {
+				auto& subsystem = sip->subsystems[idx];
+
+				if (subsystem.subobj_num < 0 || subsystem.subobj_num >= pm->n_models ||
+					subsystem.model_num != model_num) {
+					continue;
+				}
+
+				for (auto& destroyed_name : destroyed_subsystems) {
+					if (!stricmp(subsystem.subobj_name, destroyed_name.c_str()) ||
+						!stricmp(subsystem.name, destroyed_name.c_str())) {
+						pmi->submodel[subsystem.subobj_num].blown_off = true;
+						model_replicate_submodel_instance(pm, pmi, subsystem.subobj_num, empty);
+						break;
+					}
+				}
+			}
+		}
 	}
 
 	render_info.set_detail_level_lock(0);

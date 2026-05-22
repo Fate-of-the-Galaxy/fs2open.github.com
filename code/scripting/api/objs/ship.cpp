@@ -23,6 +23,7 @@
 #include "wing.h"
 
 #include "ai/aigoals.h"
+#include "ai/ai.h"
 #include "globalincs/utility.h"
 #include "hud/hudets.h"
 #include "hud/hudshield.h"
@@ -34,7 +35,6 @@
 #include "object/objectdock.h"
 #include "parse/parselo.h"
 #include "playerman/player.h"
-#include "scripting/api/objs/message.h"
 #include "ship/ship.h"
 #include "ship/shipfx.h"
 #include "ship/shiphit.h"
@@ -1162,6 +1162,24 @@ ADE_VIRTVAR(Orders, l_Ship, "shiporders", "Array of ship orders", "shiporders", 
 	return ade_set_args(L, "o", l_ShipOrders.Set(object_h(objh->objp())));
 }
 
+ADE_VIRTVAR(MaxGuardRadius, l_Ship, "number", "Sets the max range in meters at which any ships guarding this ship will engage with threats. If the value is <= 0, regular dynamic guard range behavior will resume.", "number", "Max range in meters, or 0 if handle is invalid")
+{
+	object_h *objh;
+	float new_max_guard_radius = -1;
+	if (!ade_get_args(L, "o|f", l_Ship.GetPtr(&objh), &new_max_guard_radius))
+		return ade_set_error(L, "f", 0.0f);
+
+	if(!objh->isValid())
+		return ade_set_error(L, "f", 0.0f);
+
+	ship *shipp = &Ships[objh->objp()->instance];
+
+	if (ADE_SETTING_VAR)
+		shipp->max_guard_radius = new_max_guard_radius;
+
+	return ade_set_args(L, "f", shipp->max_guard_radius);
+}
+
 ADE_VIRTVAR(WaypointSpeedCap, l_Ship, "number", "Waypoint speed cap", "number", "The limit on the ship's speed for traversing waypoints.  -1 indicates no speed cap.  0 will be returned if handle is invalid.")
 {
 	object_h* objh;
@@ -1272,7 +1290,7 @@ ADE_VIRTVAR(DepartureLocation, l_Ship, "string", "The ship's departure location"
 	return ship_getset_location_helper(L, &ship::departure_location, "Departure", Departure_location_names, MAX_DEPARTURE_NAMES);
 }
 
-static int ship_getset_anchor_helper(lua_State* L, int ship::* field)
+static int ship_getset_anchor_helper(lua_State* L, anchor_t ship::* field)
 {
 	object_h* objh;
 	const char* s = nullptr;
@@ -1286,10 +1304,11 @@ static int ship_getset_anchor_helper(lua_State* L, int ship::* field)
 
 	if (ADE_SETTING_VAR && s != nullptr)
 	{
-		shipp->*field = (stricmp(s, "<no anchor>") == 0) ? -1 : get_parse_name_index(s);
+		shipp->*field = (stricmp(s, "<no anchor>") == 0) ? anchor_t::invalid() : anchor_t(ship_registry_get_index(s));
 	}
 
-	return ade_set_args(L, "s", (shipp->*field >= 0) ? Parse_names[shipp->*field].c_str() : "<no anchor>");
+	auto anchor_entry = ship_registry_get(shipp->*field);
+	return ade_set_args(L, "s", anchor_entry ? anchor_entry->name : "<no anchor>");
 }
 
 ADE_VIRTVAR(ArrivalAnchor, l_Ship, "string", "The ship's arrival anchor", "string", "Arrival anchor, or nil if handle is invalid")
@@ -1608,6 +1627,48 @@ ADE_FUNC(fireSecondary, l_Ship, NULL, "Fires ship secondary bank(s)", "number", 
 		return ade_set_error(L, "i", 0);
 
 	return ade_set_args(L, "i", ship_fire_secondary(objh->objp(), 0));
+}
+
+ADE_FUNC(callSupport,
+	l_Ship,
+	nullptr,
+	"Forces this ship to request support rearm/repair if it's a valid ship type, not docked, and support is allowed.",
+	"boolean",
+	"True if a support request was issued, false otherwise")
+{
+	object_h* objh;
+	if (!ade_get_args(L, "o", l_Ship.GetPtr(&objh))) {
+		return ade_set_error(L, "b", false);
+	}
+
+	if (!objh->isValid()) {
+		return ade_set_error(L, "b", false);
+	}
+
+	auto objp = objh->objp();
+	auto shipp = &Ships[objp->instance];
+	auto aip = &Ai_info[shipp->ai_index];
+	auto sip = &Ship_info[shipp->ship_info_index];
+
+	if (!sip->is_fighter_bomber()) {
+		return ADE_RETURN_FALSE;
+	}
+
+	if (aip->ai_flags[AI::AI_Flags::Being_repaired, AI::AI_Flags::Awaiting_repair]) {
+		return ADE_RETURN_FALSE;
+	}
+
+	if (object_is_docked(objp)) {
+		return ADE_RETURN_FALSE;
+	}
+
+	if (!is_support_allowed(objp)) {
+		return ADE_RETURN_FALSE;
+	}
+
+	ai_issue_rearm_request(objp);
+
+	return ADE_RETURN_TRUE;
 }
 
 ADE_FUNC_DEPRECATED(getAnimationDoneTime, l_Ship, "number Type, number Subtype", "Gets time that animation will be done", "number", "Time (seconds), or 0 if ship handle is invalid",
@@ -2839,6 +2900,23 @@ ADE_FUNC(jettison, l_Ship, "number jettison_speed, [ship... dockee_ships /* All 
 		return ADE_RETURN_NIL;
 
 	return jettison_helper(L, docker_objh, jettison_speed, 2);
+}
+
+ADE_FUNC(isDockLeader, l_Ship, nullptr, "Returns whether this ship is currently docked and is the dock leader for its docked group", "boolean", "True if this ship is docked and is the dock leader, false otherwise, nil if ship handle is invalid")
+{
+	object_h* objh = nullptr;
+
+	if (!ade_get_args(L, "o", l_Ship.GetPtr(&objh)))
+		return ADE_RETURN_NIL;
+
+	if (objh == nullptr || !objh->isValid())
+		return ADE_RETURN_NIL;
+
+	if (!object_is_docked(objh->objp()))
+		return ADE_RETURN_FALSE;
+
+	auto shipp = &Ships[objh->objp()->instance];
+	return shipp->flags[Ship::Ship_Flags::Dock_leader] ? ADE_RETURN_TRUE : ADE_RETURN_FALSE;
 }
 
 ADE_FUNC(AddElectricArc, l_Ship, "vector firstPoint, vector secondPoint, number duration, number width, [number segment_depth, boolean persistent_points]",

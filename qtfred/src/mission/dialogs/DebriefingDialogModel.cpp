@@ -1,6 +1,5 @@
 #include "DebriefingDialogModel.h"
-#include "missionui/missioncmdbrief.h" //TODO remove?
-#include "mission/missionparse.h" //TODO remove?
+#include "mission/missionparse.h"
 #include "gamesnd/eventmusic.h"
 #include "sound/audiostr.h"
 #include <QMessageBox>
@@ -49,6 +48,7 @@ void DebriefingDialogModel::initializeData()
 
 	_currentTeam = 0;
 	_currentStage = 0;
+	_modified = false;
 }
 
 void DebriefingDialogModel::gotoPreviousStage()

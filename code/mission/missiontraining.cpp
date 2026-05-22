@@ -213,6 +213,18 @@ bool HudGaugeDirectives::canRender() const
 		return false;
 	}
 
+	if ((Viewer_mode & (VM_CHASE)) == 0 && only_render_in_chase_view) {
+		return false;
+	}
+
+	if (render_for_cockpit_toggle > 0) {
+		if (!(Viewer_mode & VM_CHASE) && Cockpit_active && (render_for_cockpit_toggle == 2)) {
+			return false;
+		} else if (!Cockpit_active && (render_for_cockpit_toggle == 1)) {
+			return false;
+		}
+	}
+
 	if(pop_up) {
 		if(!popUpActive()) {
 			return false;
@@ -720,7 +732,8 @@ char *translate_message_token(char *str)
 	return NULL;
 }
 
-void string_replace_tokens_with_keys(SCP_string& text) {
+void message_translate_tokens(SCP_string &text)
+{
 	text = message_translate_tokens(text.c_str());
 }
 

@@ -909,7 +909,7 @@ void clear_mission(bool fast_reload)
 	time(&currentTime);
 	auto timeinfo = localtime(&currentTime);
 
-	strcpy_s(The_mission.name, "Untitled");
+	The_mission.name = "Untitled";
 	The_mission.author = str;
 	time_to_mission_info_string(timeinfo, The_mission.created, DATE_TIME_LENGTH - 1);
 	strcpy_s(The_mission.modified, The_mission.created);
@@ -1162,7 +1162,7 @@ int update_dialog_boxes()
 		return z;
 	}
 
-	z = Prop_editor_dialog.update_data();
+	z = Prop_editor_dialog.update_data(0);
 	if (z) {
 		nprintf(("Fred routing", "prop dialog save failed\n"));
 		Prop_editor_dialog.SetWindowPos(&Fred_main_wnd->wndTop, 0, 0, 0, 0,
@@ -1180,7 +1180,7 @@ int update_dialog_boxes()
 		return z;
 	}
 
-	z = Jumpnode_editor_dialog.update_data();
+	z = Jumpnode_editor_dialog.update_data(0);
 	if (z) {
 		nprintf(("Fred routing", "jumpnode dialog save failed\n"));
 		Jumpnode_editor_dialog
@@ -1306,8 +1306,23 @@ int common_object_delete(int obj)
 			invalidate_references(wp_list->get_name(), sexp_ref_type::WAYPOINT_PATH);
 		}
 
+		// save info needed to update shifted waypoint references after removal
+		int deleted_index = wpt->get_index();
+		char list_name[NAME_LENGTH];
+		strcpy_s(list_name, wp_list->get_name());
+
 		// the actual removal code has been moved to this function in waypoints.cpp
 		waypoint_remove(wpt);
+
+		// update SEXP and AI goal references for waypoints that shifted down
+		for (int wi = deleted_index; wi < (int)count - 1; wi++) {
+			char old_wpt_name[NAME_LENGTH];
+			char new_wpt_name[NAME_LENGTH];
+			waypoint_stuff_name(old_wpt_name, list_name, wi + 2);	// old 1-based number
+			waypoint_stuff_name(new_wpt_name, list_name, wi + 1);	// new 1-based number
+			update_sexp_references(old_wpt_name, new_wpt_name);
+			ai_update_goal_references(sexp_ref_type::WAYPOINT, old_wpt_name, new_wpt_name);
+		}
 
 	} else if (type == OBJ_SHIP) {
 		name = Ships[Objects[obj].instance].ship_name;
@@ -1454,16 +1469,22 @@ int delete_ship_from_wing(int ship)
 				if (Objects[wing_objects[wing][i]].type == OBJ_SHIP) {
 					wing_bash_ship_name(name, Wings[wing].name, i + 1);
 					rename_ship(Wings[wing].ship_index[i], name);
+					// bash it again for the display name
+					wing_bash_ship_name(&Ships[Wings[wing].ship_index[i]], &Wings[wing], i + 1, true);
 				}
 			}
 
-			if (Wings[wing].threshold >= Wings[wing].wave_count){
-				Wings[wing].threshold = Wings[wing].wave_count - 1;
+			const auto max_threshold_before = MAX_SHIPS_PER_WING - Wings[wing].wave_count;
+			if (Wings[wing].threshold > max_threshold_before){
+				Wings[wing].threshold = max_threshold_before;
 			}
 
 			Wings[wing].wave_count--;
-			if (Wings[wing].wave_count && (Wings[wing].threshold >= Wings[wing].wave_count)){
-				Wings[wing].threshold = Wings[wing].wave_count - 1;
+			if (Wings[wing].wave_count){
+				const auto max_threshold_after = MAX_SHIPS_PER_WING - Wings[wing].wave_count;
+				if (Wings[wing].threshold > max_threshold_after) {
+					Wings[wing].threshold = max_threshold_after;
+				}
 			}
 		}
 	}
@@ -1827,6 +1848,26 @@ int rename_ship(int ship, const char *name)
 	strcpy_s(Ships[ship].ship_name, name);
 	if (ship == cur_ship)
 		Ship_editor_dialog.m_ship_name = _T(name);
+
+	// if this name has a hash, create a default display name
+	if (get_pointer_to_first_hash_symbol(Ships[ship].ship_name))
+	{
+		Ships[ship].display_name = Ships[ship].ship_name;
+		end_string_at_first_hash_symbol(Ships[ship].display_name);
+		Ships[ship].flags.set(Ship::Ship_Flags::Has_display_name);
+
+		if (ship == cur_ship)
+			Ship_editor_dialog.m_ship_display_name = _T(Ships[ship].display_name.c_str());
+	}
+	// otherwise reset the display name
+	else
+	{
+		Ships[ship].display_name = "";
+		Ships[ship].flags.remove(Ship::Ship_Flags::Has_display_name);
+
+		if (ship == cur_ship)
+			Ship_editor_dialog.m_ship_display_name = _T("<none>");
+	}
 
 	return 0;
 }
@@ -2283,10 +2324,15 @@ int sexp_reference_handler(int node, sexp_src source, int source_index, char *ms
 		}
 
 		case sexp_src::DEBRIEFING: {
-			debriefing_editor_dlg dlg;
+			if (!Debriefing_dialog) {
+				Debriefing_dialog = new debriefing_editor_dlg;
+				Debriefing_dialog->create();
+			}
 
-			dlg.select_sexp_node = node;
-			dlg.DoModal();
+			Debriefing_dialog->SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0,
+				SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE);
+			Debriefing_dialog->ShowWindow(SW_RESTORE);
+			Debriefing_dialog->focus_sexp(node);
 			break;
 		}
 
@@ -2481,7 +2527,7 @@ void management_add_ships_to_combo( CComboBox *box, int flags )
 				stuff_special_arrival_anchor_name(tmp, i, restrict_to_players, false);
 
 				id = box->AddString(tmp);
-				box->SetItemData(id, get_special_anchor(tmp));
+				box->SetItemData(id, get_special_anchor(tmp).value());
 			}
 		}
 	}

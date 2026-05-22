@@ -1395,13 +1395,13 @@ void Fred_mission_save::fso_comment_push(const char* ver)
 		return;
 	}
 
-	SCP_string before = fso_ver_comment.back();
+	const auto &before = fso_ver_comment.back();
 
 	int major, minor, build, revis;
 	int in_major, in_minor, in_build, in_revis;
 	int elem1, elem2;
 
-	elem1 = scan_fso_version_string(fso_ver_comment.back().c_str(), &major, &minor, &build, &revis);
+	elem1 = scan_fso_version_string(before.c_str(), &major, &minor, &build, &revis);
 	elem2 = scan_fso_version_string(ver, &in_major, &in_minor, &in_build, &in_revis);
 
 	// check consistency
@@ -2158,8 +2158,7 @@ int Fred_mission_save::save_fiction()
 					else
 						fout("\n$Font:");
 					fout(" %s", stage.font_filename);
-				} else
-					optional_string_fred("$Font:");
+				}
 
 				// save voice
 				if (strlen(stage.voice_filename) > 0) //-V805
@@ -2169,8 +2168,7 @@ int Fred_mission_save::save_fiction()
 					else
 						fout("\n$Voice:");
 					fout(" %s", stage.voice_filename);
-				} else
-					optional_string_fred("$Voice:");
+				}
 
 				// save UI
 				if (strlen(stage.ui_name) > 0) {
@@ -2179,8 +2177,7 @@ int Fred_mission_save::save_fiction()
 					else
 						fout("\n$UI:");
 					fout(" %s", stage.ui_name);
-				} else
-					optional_string_fred("$UI:");
+				}
 
 				// save background
 				save_custom_bitmap("$Background 640:",
@@ -2198,8 +2195,7 @@ int Fred_mission_save::save_fiction()
 					else
 						fout("\n$Formula:");
 					fout(" %s", sexp_out.c_str());
-				} else
-					optional_string_fred("$Formula:");
+				}
 			}
 		} else {
 			SCP_string msg = "Warning: This mission contains fiction viewer data, but you are saving in the retail "
@@ -2445,6 +2441,43 @@ int Fred_mission_save::save_mission_file(const char* pathname)
 	return err;
 }
 
+int Fred_mission_save::save_template_file(const char* pathname)
+{
+	char savepath[MAX_PATH_LEN];
+
+	strcpy_s(savepath, "");
+	auto p = strrchr(pathname, DIR_SEPARATOR_CHAR);
+	if (p) {
+		auto len = p - pathname;
+		strncpy(savepath, pathname, len);
+		savepath[len] = '\0';
+		strcat_s(savepath, DIR_SEPARATOR_STR);
+	}
+	strcat_s(savepath, "saving.xxx");
+
+	save_mission_internal(savepath);
+
+	if (!err) {
+		// Templates don't get .bak backups; just overwrite directly
+		cf_delete(pathname, CF_TYPE_MISSIONS);
+		cf_rename(savepath, pathname, CF_TYPE_MISSIONS);
+	}
+
+	return err;
+}
+
+void Fred_mission_save::save_template_info()
+{
+	const auto& ti = save_config.template_info;
+
+	fout("#Template Info\n");
+	fout("\n$Template Title: %s", ti.title.c_str());
+	fout("\n$Template Author: %s", ti.author.c_str());
+	fout("\n$Template Tags: %s", ti.tags.c_str());
+	fout("\n$Template Description:\n%s\n$end_template_desc", ti.description.c_str());
+	fout("\n\n#End Template Info\n\n");
+}
+
 int Fred_mission_save::save_mission_info()
 {
 	required_string_fred("#Mission Info");
@@ -2463,7 +2496,7 @@ int Fred_mission_save::save_mission_info()
 	// XSTR
 	required_string_fred("$Name:");
 	parse_comments();
-	fout_ext(" ", "%s", The_mission.name);
+	fout_ext(" ", "%s", The_mission.name.c_str());
 
 	required_string_fred("$Author:");
 	parse_comments();
@@ -2534,6 +2567,10 @@ int Fred_mission_save::save_mission_info()
 
 		if (The_mission.contrail_threshold != CONTRAIL_THRESHOLD_DEFAULT) {
 			fout("\n$Contrail Speed Threshold: %d\n", The_mission.contrail_threshold);
+		}
+
+		if (The_mission.flags[Mission::Mission_Flags::Large_ships_no_collide_by_default]) {
+			fout("\n+Large Ship Collision Group: %d\n", The_mission.large_ship_no_collide_collision_group);
 		}
 	}
 
@@ -2977,7 +3014,7 @@ int Fred_mission_save::save_mission_info()
 	fso_comment_pop();
 
 	// EatThePath's lighting profiles
-	if (The_mission.lighting_profile_name != lighting_profiles::default_name()) {
+	if (!The_mission.lighting_profile_name.empty() && The_mission.lighting_profile_name != lighting_profiles::default_name()) {
 		fso_comment_push(";;FSO 23.1.0;;");
 		if (optional_string_fred("$Lighting Profile:")) {
 			parse_comments(2);
@@ -3068,6 +3105,9 @@ void Fred_mission_save::save_mission_internal(const char* pathname)
 		err = -1;
 		return;
 	}
+
+	if (!save_config.template_info.title.empty())
+		save_template_info();
 
 	// Goober5000
 	convert_special_tags_to_retail();
@@ -3418,7 +3458,8 @@ int Fred_mission_save::save_objects()
 		count++;
 
 		// Display name
-		// The display name is only written if there was one at the start to avoid introducing inconsistencies
+		// (If we are always saving display names, the "only/not written" comments do not apply)
+		// The display name is only written if it currently exists and the ship is not part of a wing, to avoid introducing inconsistencies
 		if (save_config.save_format != MissionFormat::RETAIL && ((save_config.always_save_display_names && shipp->wingnum < 0) || shipp->has_display_name())) {
 			char truncated_name[NAME_LENGTH];
 			strcpy_s(truncated_name, shipp->ship_name);
@@ -3426,10 +3467,10 @@ int Fred_mission_save::save_objects()
 
 			// Also, the display name is not written if it's just the truncation of the name at the hash
 			if ((save_config.always_save_display_names && shipp->wingnum < 0) || strcmp(shipp->get_display_name(), truncated_name) != 0) {
-				if (optional_string_fred("$Display name:", "$Class:")) {
+				if (optional_string_fred("$Display Name:", "$Class:")) {
 					parse_comments();
 				} else {
-					fout("\n$Display name:");
+					fout("\n$Display Name:");
 				}
 				fout_ext(" ", "%s", shipp->get_display_name());
 			}
@@ -3559,10 +3600,10 @@ int Fred_mission_save::save_objects()
 				fout("\n$Arrival Anchor:");
 			}
 
-			z = shipp->arrival_anchor;
+			z = shipp->arrival_anchor.value();
 			if (z < 0) {
 				fout(" <error>");
-			} else if (z & SPECIAL_ARRIVAL_ANCHOR_FLAG) {
+			} else if (z & ANCHOR_SPECIAL_ARRIVAL) {
 				// get name
 				char tmp[NAME_LENGTH + 15];
 				stuff_special_arrival_anchor_name(tmp, z, save_config.save_format == MissionFormat::RETAIL);
@@ -3570,22 +3611,20 @@ int Fred_mission_save::save_objects()
 				// save it
 				fout(" %s", tmp);
 			} else {
-				fout(" %s", Ships[z].ship_name);
+				auto anchor_entry = ship_registry_get(z);
+				fout(" %s", anchor_entry ? anchor_entry->name : "<error>");
 			}
 		}
 
 		// Goober5000
 		if (save_config.save_format != MissionFormat::RETAIL) {
 			if ((shipp->arrival_location == ArrivalLocation::FROM_DOCK_BAY) && (shipp->arrival_path_mask > 0)) {
-				int anchor_shipnum;
-				polymodel* pm;
-
-				anchor_shipnum = shipp->arrival_anchor;
-				Assert(anchor_shipnum >= 0 && anchor_shipnum < MAX_SHIPS);
+				auto anchor_entry = ship_registry_get(shipp->arrival_anchor);
+				Assertion(anchor_entry, "Could not find arrival anchor for ship %s!", shipp->ship_name);
+				auto pm = model_get(anchor_entry->sip()->model_num);
 
 				fout("\n+Arrival Paths: ( ");
 
-				pm = model_get(Ship_info[Ships[anchor_shipnum].ship_info_index].model_num);
 				for (auto n = 0; n < pm->ship_bay->num_paths; n++) {
 					if (shipp->arrival_path_mask & (1 << n)) {
 						fout("\"%s\" ", pm->paths[pm->ship_bay->path_indexes[n]].name);
@@ -3622,24 +3661,19 @@ int Fred_mission_save::save_objects()
 			required_string_fred("$Departure Anchor:");
 			parse_comments();
 
-			if (shipp->departure_anchor >= 0)
-				fout(" %s", Ships[shipp->departure_anchor].ship_name);
-			else
-				fout(" <error>");
+			auto anchor_entry = ship_registry_get(shipp->departure_anchor);
+			fout(" %s", anchor_entry ? anchor_entry->name : "<error>");
 		}
 
 		// Goober5000
 		if (save_config.save_format != MissionFormat::RETAIL) {
 			if ((shipp->departure_location == DepartureLocation::TO_DOCK_BAY) && (shipp->departure_path_mask > 0)) {
-				int anchor_shipnum;
-				polymodel* pm;
-
-				anchor_shipnum = shipp->departure_anchor;
-				Assert(anchor_shipnum >= 0 && anchor_shipnum < MAX_SHIPS);
+				auto anchor_entry = ship_registry_get(shipp->departure_anchor);
+				Assertion(anchor_entry, "Could not find departure anchor for ship %s!", shipp->ship_name);
+				auto pm = model_get(anchor_entry->sip()->model_num);
 
 				fout("\n+Departure Paths: ( ");
 
-				pm = model_get(Ship_info[Ships[anchor_shipnum].ship_info_index].model_num);
 				for (auto n = 0; n < pm->ship_bay->num_paths; n++) {
 					if (shipp->departure_path_mask & (1 << n)) {
 						fout("\"%s\" ", pm->paths[pm->ship_bay->path_indexes[n]].name);
@@ -3814,6 +3848,8 @@ int Fred_mission_save::save_objects()
 				fout(" \"cannot-perform-scan-show-cargo\"");
 			if (shipp->flags[Ship::Ship_Flags::No_targeting_limits])
 				fout(" \"no-targeting-limits\"");
+			if (shipp->flags[Ship::Ship_Flags::No_scanned_cargo])
+				fout(" \"no-scanned-cargo\"");
 			fout(" )");
 		}
 		// -----------------------------------------------------------
@@ -4066,6 +4102,17 @@ int Fred_mission_save::save_objects()
 				fout("\n+Group:");
 
 			fout(" %d", shipp->group);
+		}
+
+		if (save_config.save_format != MissionFormat::RETAIL &&
+			!shipp->fred_layer.empty() &&
+			!lcase_equal(shipp->fred_layer, "Default")) {
+			if (optional_string_fred("+Layer:", "$Name:"))
+				parse_comments();
+			else
+				fout("\n+Layer:");
+
+			fout(" %s", shipp->fred_layer.c_str());
 		}
 
 		// always write out the score to ensure backwards compatibility. If the score is the same as the value
@@ -4761,7 +4808,8 @@ int Fred_mission_save::save_waypoints()
 
 		if (save_config.save_format != MissionFormat::RETAIL) {
 
-			// The display name is only written if there was one at the start to avoid introducing inconsistencies
+			// (If we are always saving display names, the "only/not written" comments do not apply)
+			// The display name is only written if it currently exists, to avoid introducing inconsistencies
 			if (save_config.always_save_display_names || jnp->HasDisplayName()) {
 				char truncated_name[NAME_LENGTH];
 				strcpy_s(truncated_name, jnp->GetName());
@@ -4815,6 +4863,15 @@ int Fred_mission_save::save_waypoints()
 				else
 					fout(" %s", "false");
 			}
+
+			const SCP_string& jn_layer = jnp->GetFredLayer();
+			if (!jn_layer.empty() && !lcase_equal(jn_layer, "Default")) {
+				if (optional_string_fred("+Layer:", "$Jump Node:"))
+					parse_comments();
+				else
+					fout("\n+Layer:");
+				fout(" %s", jn_layer.c_str());
+			}
 		}
 
 		fso_comment_pop();
@@ -4826,6 +4883,36 @@ int Fred_mission_save::save_waypoints()
 		required_string_fred("$Name:");
 		parse_comments(first_wpt_list ? 1 : 2);
 		fout(" %s", ii.get_name());
+
+		if (save_config.save_format != MissionFormat::RETAIL) {
+
+			int nol_in_file = optional_string_fred("+No Draw Lines:", "$List:");
+			if (nol_in_file)
+				parse_comments();
+			if (nol_in_file || ii.get_no_draw_lines()) {
+				if (!nol_in_file)
+					fout("\n+No Draw Lines:");
+				fout(" %s", ii.get_no_draw_lines() ? "true" : "false");
+			}
+
+			if (ii.get_has_custom_color()) {
+				if (optional_string_fred("+Color:", "$List:")) {
+					parse_comments();
+				} else {
+					fout("\n+Color:");
+				}
+				fout(" %d %d %d", ii.get_color_r(), ii.get_color_g(), ii.get_color_b());
+			}
+
+			const SCP_string& wpt_layer = ii.get_fred_layer();
+			if (!wpt_layer.empty() && !lcase_equal(wpt_layer, "Default")) {
+				if (optional_string_fred("+Layer:", "$List:"))
+					parse_comments();
+				else
+					fout("\n+Layer:");
+				fout(" %s", wpt_layer.c_str());
+			}
+		}
 
 		required_string_fred("$List:");
 		parse_comments();
@@ -4875,6 +4962,25 @@ int Fred_mission_save::save_wings()
 		fout(" %s", w.name);
 
 		count++;
+
+		// Display name
+		// (If we are always saving display names, the "only/not written" comments do not apply)
+		// The display name is only written if it currently exists, to avoid introducing inconsistencies
+		if (save_config.save_format != MissionFormat::RETAIL && (save_config.always_save_display_names || w.has_display_name())) {
+			char truncated_name[NAME_LENGTH];
+			strcpy_s(truncated_name, w.name);
+			end_string_at_first_hash_symbol(truncated_name);
+
+			// Also, the display name is not written if it's just the truncation of the name at the hash
+			if (save_config.always_save_display_names || strcmp(w.get_display_name(), truncated_name) != 0) {
+				if (optional_string_fred("$Display Name:", "$Waves:")) {
+					parse_comments();
+				} else {
+					fout("\n$Display Name:");
+				}
+				fout_ext(" ", "%s", w.get_display_name());
+			}
+		}
 
 		// squad logo - Goober5000
 		if (save_config.save_format != MissionFormat::RETAIL) {
@@ -4936,10 +5042,10 @@ int Fred_mission_save::save_wings()
 			else
 				fout("\n$Arrival Anchor:");
 
-			int z = w.arrival_anchor;
+			int z = w.arrival_anchor.value();
 			if (z < 0) {
 				fout(" <error>");
-			} else if (z & SPECIAL_ARRIVAL_ANCHOR_FLAG) {
+			} else if (z & ANCHOR_SPECIAL_ARRIVAL) {
 				// get name
 				char tmp[NAME_LENGTH + 15];
 				stuff_special_arrival_anchor_name(tmp, z, save_config.save_format == MissionFormat::RETAIL);
@@ -4947,22 +5053,20 @@ int Fred_mission_save::save_wings()
 				// save it
 				fout(" %s", tmp);
 			} else {
-				fout(" %s", Ships[z].ship_name);
+				auto anchor_entry = ship_registry_get(z);
+				fout(" %s", anchor_entry ? anchor_entry->name : "<error>");
 			}
 		}
 
 		// Goober5000
 		if (save_config.save_format != MissionFormat::RETAIL) {
 			if ((w.arrival_location == ArrivalLocation::FROM_DOCK_BAY) && (w.arrival_path_mask > 0)) {
-				int anchor_shipnum;
-				polymodel* pm;
-
-				anchor_shipnum = w.arrival_anchor;
-				Assert(anchor_shipnum >= 0 && anchor_shipnum < MAX_SHIPS);
+				auto anchor_entry = ship_registry_get(w.arrival_anchor);
+				Assertion(anchor_entry, "Could not find arrival anchor for wing %s!", w.name);
+				auto pm = model_get(anchor_entry->sip()->model_num);
 
 				fout("\n+Arrival Paths: ( ");
 
-				pm = model_get(Ship_info[Ships[anchor_shipnum].ship_info_index].model_num);
 				for (auto n = 0; n < pm->ship_bay->num_paths; n++) {
 					if (w.arrival_path_mask & (1 << n)) {
 						fout("\"%s\" ", pm->paths[pm->ship_bay->path_indexes[n]].name);
@@ -4995,24 +5099,19 @@ int Fred_mission_save::save_wings()
 			required_string_fred("$Departure Anchor:");
 			parse_comments();
 
-			if (w.departure_anchor >= 0)
-				fout(" %s", Ships[w.departure_anchor].ship_name);
-			else
-				fout(" <error>");
+			auto anchor_entry = ship_registry_get(w.departure_anchor);
+			fout(" %s", anchor_entry ? anchor_entry->name : "<error>");
 		}
 
 		// Goober5000
 		if (save_config.save_format != MissionFormat::RETAIL) {
 			if ((w.departure_location == DepartureLocation::TO_DOCK_BAY) && (w.departure_path_mask > 0)) {
-				int anchor_shipnum;
-				polymodel* pm;
-
-				anchor_shipnum = w.departure_anchor;
-				Assert(anchor_shipnum >= 0 && anchor_shipnum < MAX_SHIPS);
+				auto anchor_entry = ship_registry_get(w.departure_anchor);
+				Assertion(anchor_entry, "Could not find departure anchor for wing %s!", w.name);
+				auto pm = model_get(anchor_entry->sip()->model_num);
 
 				fout("\n+Departure Paths: ( ");
 
-				pm = model_get(Ship_info[Ships[anchor_shipnum].ship_info_index].model_num);
 				for (auto n = 0; n < pm->ship_bay->num_paths; n++) {
 					if (w.departure_path_mask & (1 << n)) {
 						fout("\"%s\" ", pm->paths[pm->ship_bay->path_indexes[n]].name);
@@ -5176,6 +5275,17 @@ int Fred_mission_save::save_props()
 				if (!(Objects[p->objnum].flags[Object::Object_Flags::Collides]))
 					fout(" \"no_collide\"");
 				fout(" )");
+
+				if (save_config.save_format != MissionFormat::RETAIL &&
+					!p->fred_layer.empty() &&
+					!lcase_equal(p->fred_layer, "Default")) {
+					if (optional_string_fred("+Layer:", "$Name:"))
+						parse_comments();
+					else
+						fout("\n+Layer:");
+
+					fout(" %s", p->fred_layer.c_str());
+				}
 
 				fso_comment_pop();
 			}

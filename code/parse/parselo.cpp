@@ -2568,6 +2568,7 @@ void coerce_to_utf8(SCP_string &buffer, const char *str)
 	if (isLatin1)
 	{
 		unicode::convert_encoding(buffer, str, unicode::Encoding::Encoding_iso8859_1, unicode::Encoding::Encoding_utf8);
+		return;
 	}
 
 	// unknown encoding, so just truncate
@@ -3648,7 +3649,7 @@ void pause_parse()
 	Mark.Warning_count = Warning_count;
 	Mark.Error_count = Error_count;
 
-	Bookmarks.push_back(Mark);
+	Bookmarks.push_back(std::move(Mark));
 }
 
 // unpause parsing to continue with previously parsing file
@@ -4400,18 +4401,10 @@ bool can_construe_as_integer(const char *text)
 
 // Goober5000
 // yoinked gratefully from dbugfile.cpp
-void vsprintf(SCP_string &dest, const char *format, va_list ap)
+void vsprintf(SCP_string &dest, const char *format, va_list ap, size_t write_offset)
 {
 	va_list copy;
-
-#if defined(_MSC_VER) && _MSC_VER < 1800
-	// Only Visual Studio >= 2013 supports va_copy
-	// This isn't portable but should work for Visual Studio
-	copy = ap;
-#else
 	va_copy(copy, ap);
-#endif
-
 	int needed_length = vsnprintf(nullptr, 0, format, copy);
 	va_end(copy);
 
@@ -4420,15 +4413,23 @@ void vsprintf(SCP_string &dest, const char *format, va_list ap)
 		return;
 	}
 
-	dest.resize(static_cast<size_t>(needed_length));
-	vsnprintf(&dest[0], dest.size() + 1, format, ap);
+	dest.resize(write_offset + i2sz(needed_length));
+	vsnprintf(&dest[write_offset], i2sz(needed_length) + 1, format, ap);
 }
 
-void sprintf(SCP_string &dest, const char *format, ...)
+void sprintf(SCP_string &dest, SCP_FORMAT_STRING const char *format, ...)
 {
 	va_list args;
 	va_start(args, format);
 	vsprintf(dest, format, args);
+	va_end(args);
+}
+
+void sprintf_concat(SCP_string &dest, SCP_FORMAT_STRING const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	vsprintf(dest, format, args, dest.size());
 	va_end(args);
 }
 

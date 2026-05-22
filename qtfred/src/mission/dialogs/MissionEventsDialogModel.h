@@ -84,6 +84,11 @@ class MissionEventsDialogModel : public AbstractDialogModel {
 	int getCurrentlySelectedMessage() const;
 	const SCP_vector<SCP_string>& getHeadAniList();
 	const SCP_vector<SCP_string>& getWaveList();
+
+	// Session-persistent list of head ANIs discovered outside the built-in defaults
+	static void addExtraHeadAni(const SCP_string& name);
+	static void clearBrowsedHeadAnis();
+	static const SCP_vector<SCP_string>& getExtraHeadAnis();
 	const SCP_vector<std::pair<SCP_string, int>>& getPersonaList();
 	const SCP_vector<std::pair<SCP_string, int>>& getTeamList();
 
@@ -104,6 +109,8 @@ class MissionEventsDialogModel : public AbstractDialogModel {
 	void setChained(bool chained);
 	int getChainDelay() const;
 	void setChainDelay(int delay);
+	bool getUseMsecs() const;
+	void setUseMsecs(bool useMsecs);
 	int getEventScore() const;
 	void setEventScore(int score);
 	int getEventTeam() const;
@@ -199,6 +206,8 @@ class MissionEventsDialogModel : public AbstractDialogModel {
 
 	SCP_vector<SCP_string> m_head_ani_list;
 	SCP_vector<SCP_string> m_wave_list;
+
+	static SCP_vector<SCP_string> s_extra_head_anis;
 	SCP_vector<std::pair<SCP_string, int>> m_persona_list;
 	SCP_vector<std::pair<SCP_string, int>> m_team_list;
 };

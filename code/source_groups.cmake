@@ -115,6 +115,8 @@ add_file_folder("Bmpman"
 add_file_folder("Camera"
 	camera/camera.cpp
 	camera/camera.h
+	camera/photomode.cpp
+	camera/photomode.h
 )
 
 add_file_folder("Cheats Table"
@@ -1162,6 +1164,8 @@ add_file_folder("Particle\\\\Volumes"
 	particle/volumes/ConeVolume.h
 	particle/volumes/LegacyAACuboidVolume.cpp
 	particle/volumes/LegacyAACuboidVolume.h
+	particle/volumes/ModelSurfaceVolume.cpp
+	particle/volumes/ModelSurfaceVolume.h
 	particle/volumes/PointVolume.cpp
 	particle/volumes/PointVolume.h
 	particle/volumes/RingVolume.cpp
@@ -1590,6 +1594,7 @@ add_file_folder("Scripting\\\\Lua\\\\BitOp"
 
 # Ship files
 add_file_folder("Ship"
+	ship/anchor_t.h
 	ship/afterburner.cpp
 	ship/afterburner.h
 	ship/awacs.cpp
@@ -1628,16 +1633,25 @@ add_file_folder("Sound"
 	sound/rtvoice.h
 	sound/sound.cpp
 	sound/sound.h
-	sound/speech.cpp
 	sound/speech.h
 	sound/voicerec.cpp
 	sound/voicerec.h
 )
 
-if (APPLE)
+if (WIN32)
 	add_file_folder("Sound"
 		${file_root_sound}
-		sound/speech.mm
+		sound/speech_win.cpp
+	)
+elseif (APPLE)
+	add_file_folder("Sound"
+		${file_root_sound}
+		sound/speech_mac.mm
+	)
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+	add_file_folder("Sound"
+		${file_root_sound}
+		sound/speech_linux.cpp
 	)
 endif()
 
@@ -1740,6 +1754,8 @@ add_file_folder("Utils"
 	utils/RandomRange.h
 	utils/string_utils.cpp
 	utils/string_utils.h
+	utils/table_viewer.cpp
+	utils/table_viewer.h
 	utils/strings.h
 	utils/threading.cpp
 	utils/threading.h

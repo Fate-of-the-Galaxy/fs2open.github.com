@@ -1,6 +1,3 @@
-//
-//
-
 #if defined(_MSC_VER) && _MSC_VER <= 1920
 	// work around MSVC 2015 and 2017 compiler bug
 	// https://bugreports.qt.io/browse/QTBUG-72073
@@ -23,7 +20,7 @@
 #include <QtWidgets/QMessageBox>
 
 #include "osapi/osapi.h"
-#include "io/key.h"
+#include "ui/ControlBindings.h"
 #include "io/timer.h"
 #include "starfield/starfield.h"
 
@@ -31,8 +28,7 @@
 #include "FredApplication.h"
 #include "ui/FredView.h"
 
-namespace fso {
-namespace fred {
+namespace fso::fred {
 
 RenderWindow::RenderWindow(RenderWidget* renderWidget) : QWindow((QWindow*) nullptr), _renderWidget(renderWidget) {
 	setSurfaceType(QWindow::OpenGLSurface);
@@ -64,8 +60,12 @@ bool RenderWindow::event(QEvent* evt) {
 		auto mouseEvent = static_cast<QMouseEvent*>(evt);
 
 		if (mouseEvent->button() == Qt::RightButton) {
-			// Right button events may cause a context menu so we send that to our parent which will handle that
-			qGuiApp->sendEvent(parent(), evt);
+			// Let the render widget consume right clicks for drag-cancel behavior first.
+			qGuiApp->sendEvent(_renderWidget, evt);
+			if (!evt->isAccepted()) {
+				// Not consumed by the render widget, forward for context menu handling.
+				qGuiApp->sendEvent(parent(), evt);
+			}
 		} else {
 			// The rest will be handled by the render widget
 			qGuiApp->sendEvent(_renderWidget, evt);
@@ -74,6 +74,7 @@ bool RenderWindow::event(QEvent* evt) {
 	}
 	case QEvent::KeyPress:
 	case QEvent::KeyRelease:
+	case QEvent::ShortcutOverride:
 	case QEvent::MouseButtonDblClick:
 	case QEvent::MouseMove: {
 		// Redirect all the events to the render widget since we want to handle them in in the QtWidget related code
@@ -94,8 +95,7 @@ void RenderWindow::resizeEvent(QResizeEvent* event) {
 		_renderer->resize(event->size().width(), event->size().height());
 	}
 }
-RenderWindow::~RenderWindow() {
-}
+RenderWindow::~RenderWindow() = default;
 void RenderWindow::exposeEvent(QExposeEvent* event) {
 	if (isExposed()) {
 		requestUpdate();
@@ -119,7 +119,7 @@ void RenderWindow::setEditor(Editor* editor, FredRenderer* renderer) {
 	connect(_renderer, &FredRenderer::scheduleUpdate, this, &QWindow::requestUpdate);
 }
 RenderWidget::RenderWidget(QWidget* parent) : QWidget(parent) {
-	setFocusPolicy(Qt::NoFocus);
+	setFocusPolicy(Qt::StrongFocus);
 	setMouseTracking(true);
 
 	_window = new RenderWindow(this);
@@ -131,23 +131,6 @@ RenderWidget::RenderWidget(QWidget* parent) : QWidget(parent) {
 
 	setLayout(layout);
 
-	qt2fsKeys[Qt::Key_Shift] = KEY_LSHIFT;
-	qt2fsKeys[Qt::Key_A] = KEY_A;
-	qt2fsKeys[Qt::Key_Z] = KEY_Z;
-	qt2fsKeys[Qt::Key_0 + Qt::KeypadModifier] = KEY_PAD0;
-	qt2fsKeys[Qt::Key_1 + Qt::KeypadModifier] = KEY_PAD1;
-	qt2fsKeys[Qt::Key_2 + Qt::KeypadModifier] = KEY_PAD2;
-	qt2fsKeys[Qt::Key_3 + Qt::KeypadModifier] = KEY_PAD3;
-	qt2fsKeys[Qt::Key_4 + Qt::KeypadModifier] = KEY_PAD4;
-	qt2fsKeys[Qt::Key_5 + Qt::KeypadModifier] = KEY_PAD5;
-	qt2fsKeys[Qt::Key_6 + Qt::KeypadModifier] = KEY_PAD6;
-	qt2fsKeys[Qt::Key_7 + Qt::KeypadModifier] = KEY_PAD7;
-	qt2fsKeys[Qt::Key_8 + Qt::KeypadModifier] = KEY_PAD8;
-	qt2fsKeys[Qt::Key_9 + Qt::KeypadModifier] = KEY_PAD9;
-	qt2fsKeys[Qt::Key_Plus + Qt::KeypadModifier] = KEY_PADPLUS;
-	qt2fsKeys[Qt::Key_Minus + Qt::KeypadModifier] = KEY_PADMINUS;
-	qt2fsKeys[Qt::Key_Space] = KEY_SPACEBAR;
-	qt2fsKeys[Qt::Key_Escape] = KEY_ESC;
 
 	_standardCursor.reset(new QCursor(Qt::ArrowCursor));
 	_moveCursor.reset(new QCursor(Qt::SizeAllCursor));
@@ -178,47 +161,61 @@ void RenderWidget::contextMenuEvent(QContextMenuEvent* event) {
 }
 
 void RenderWidget::keyPressEvent(QKeyEvent* key) {
-	if (key->isAutoRepeat()) {
-		QWidget::keyPressEvent(key);
+	if (_viewport != nullptr && key->key() == Qt::Key_Escape && _viewport->button_down) {
+		_viewport->cancel_drag();
+		_usingMarkingBox = false;
+		key->accept();
 		return;
 	}
 
-	auto code = key->key() + (int) key->modifiers();
-	if (!qt2fsKeys.count(code)) {
+	if (!ControlBindings::instance().handleKeyPress(key)) {
 		QWidget::keyPressEvent(key);
 		return;
 	}
-
-	key_mark(qt2fsKeys.at(code), 1, 0);
+	key->accept();
 }
 
 void RenderWidget::keyReleaseEvent(QKeyEvent* key) {
-	if (key->isAutoRepeat()) {
+	if (!ControlBindings::instance().handleKeyRelease(key)) {
 		QWidget::keyReleaseEvent(key);
 		return;
 	}
-
-	auto code = key->key() + (int) key->modifiers();
-	if (!qt2fsKeys.count(code)) {
-		QWidget::keyReleaseEvent(key);
-		return;
+	key->accept();
+}
+bool RenderWidget::event(QEvent* evt) {
+	if (evt->type() == QEvent::ShortcutOverride) {
+		auto* keyEvent = static_cast<QKeyEvent*>(evt);
+		if (ControlBindings::instance().matches(keyEvent)) {
+			evt->accept();
+			return true;
+		}
 	}
 
-	key_mark(qt2fsKeys.at(code), 0, 0);
+	return QWidget::event(evt);
 }
 void RenderWidget::mouseDoubleClickEvent(QMouseEvent* event) {
 	event->ignore();
 }
 void RenderWidget::mousePressEvent(QMouseEvent* event) {
+	if (event->button() == Qt::RightButton) {
+		if (_viewport != nullptr && _viewport->button_down) {
+			_viewport->cancel_drag();
+			_usingMarkingBox = false;
+			event->accept();
+		} else {
+			event->ignore();
+		}
+		return;
+	}
+
 	if (event->button() != Qt::LeftButton) {
 		// Ignore everything that has nothing to to with the left button
 		return QWidget::mousePressEvent(event);
 	}
 
 	int waypoint_instance = -1;
-	if (fred->cur_waypoint != NULL)
-	{
-		Assert(fred->cur_waypoint_list != NULL);
+	if (fred->cur_waypoint != nullptr) {
+		Assertion(fred->cur_waypoint_list != nullptr, "cur_waypoint is set but cur_waypoint_list is null!");
 		waypoint_instance = Objects[fred->cur_waypoint->get_objnum()].instance;
 	}
 
@@ -229,36 +226,25 @@ void RenderWidget::mousePressEvent(QMouseEvent* event) {
 	_viewport->on_object = _viewport->select_object(event->x(), event->y());
 	_viewport->button_down = 1;
 
-	_viewport->drag_rotate_save_backup();
-
 	if (event->modifiers().testFlag(Qt::ControlModifier)) {  // add a new object
-		if (!_viewport->Bg_bitmap_dialog) {
-			if (_viewport->on_object == -1) {
-				_viewport->Selection_lock = 0;  // force off selection lock
-				_viewport->on_object = _viewport->create_object_on_grid(event->x(), event->y(), waypoint_instance);
-
-			} else {
-				_viewport->Dup_drag = 1;
+		if (_viewport->on_object == -1) {
+			_viewport->Selection_lock = false;  // force off selection lock
+			const bool shift = event->modifiers().testFlag(Qt::ShiftModifier);
+			const bool alt   = event->modifiers().testFlag(Qt::AltModifier);
+			auto kind = CreateKind::Ship;
+			if (alt && !shift) {
+				kind = CreateKind::Other;
+			} else if (shift && !alt) {
+				kind = CreateKind::Prop;
 			}
+			_viewport->on_object = _viewport->create_object_on_grid(event->x(), event->y(), waypoint_instance, kind);
+
 		} else {
-			/*
-			Selection_lock = 0;  // force off selection lock
-			on_object = Cur_bitmap = create_bg_bitmap();
-			Bg_bitmap_dialog->update_data();
-			Update_window = 1;
-			if (Cur_bitmap == -1)
-				MessageBox("Background bitmap limit reached.\nCan't add more.");
-			*/
+			_viewport->Dup_drag = 1;
 		}
 
 	} else if (!_viewport->Selection_lock) {
-		if (_viewport->Bg_bitmap_dialog) {
-			/*
-			 TODO: Briefing dialog is not yet implemented!
-			Cur_bitmap = on_object;
-			Bg_bitmap_dialog -> update_data();
-*/
-		} else if ((event->modifiers().testFlag(Qt::ShiftModifier)) || (_viewport->on_object == -1)
+		if ((event->modifiers().testFlag(Qt::ShiftModifier)) || (_viewport->on_object == -1)
 			|| !(Objects[_viewport->on_object].flags[Object::Object_Flags::Marked])) {
 			if (!event->modifiers().testFlag(Qt::ShiftModifier)) {
 				fred->unmark_all();
@@ -274,6 +260,9 @@ void RenderWidget::mousePressEvent(QMouseEvent* event) {
 		}
 	}
 
+	// Save drag/rotate backup after selection state is finalized for this click.
+	_viewport->drag_rotate_save_backup();
+
 	if (query_valid_object(fred->currentObject)) {
 		_viewport->original_pos = Objects[fred->currentObject].pos;
 	}
@@ -288,19 +277,6 @@ void RenderWidget::mousePressEvent(QMouseEvent* event) {
 
 		_viewport->needsUpdate();
 	}
-
-	/*
-     TODO: Briefing dialog is not yet implemented!
-if (query_valid_object(fred->getCurrentObject()) && (fred->getNumMarked() == 1)
-    && (Objects[fred->getCurrentObject()].type == OBJ_POINT)) {
-Assert(Briefing_dialog);
-Briefing_dialog->icon_select(Objects[cur_object_index].instance);
-	} else {
-		if (Briefing_dialog) {
-			Briefing_dialog->icon_select(-1);
-		}
-	}
-*/
 }
 void RenderWidget::mouseMoveEvent(QMouseEvent* event) {
 	auto mouseDX = event->pos() - _lastMouse;
@@ -319,14 +295,6 @@ void RenderWidget::mouseMoveEvent(QMouseEvent* event) {
 		_viewport->button_down = false;
 	}
 
-	// The following will cancel a drag operation if another program running in memory
-	// happens to jump in and take over (such as new email has arrived popup boxes).
-	/*
-	TODO: Investiage if this is still required
-	if (_viewport->button_down && GetCapture() != this)
-		_viewport->cancel_drag();
-	 */
-
 	if (_viewport->button_down) {
 		if (abs(_markingBox.x1 - _markingBox.x2) > 1 || abs(_markingBox.y1 - _markingBox.y2) > 1) {
 			_viewport->moved = true;
@@ -340,7 +308,7 @@ void RenderWidget::mouseMoveEvent(QMouseEvent* event) {
 					_viewport->drag_rotate_objects(mouseDX.x(), mouseDX.y());
 				}
 
-			} else if (!_viewport->Bg_bitmap_dialog) {
+			} else {
 				_usingMarkingBox = true;
 			}
 
@@ -352,18 +320,12 @@ void RenderWidget::mouseMoveEvent(QMouseEvent* event) {
 }
 void RenderWidget::mouseReleaseEvent(QMouseEvent* event) {
 	if (event->button() != Qt::LeftButton) {
-		// Ignore everything that has nothing to to with the left button
-		return QWidget::mousePressEvent(event);
+		// Ignore everything that has nothing to do with the left button
+		return QWidget::mouseReleaseEvent(event);
 	}
 
 	_markingBox.x2 = event->x();
 	_markingBox.y2 = event->y();
-
-	/*
-	TODO: Investiage if this is still required
-	if (_viewport->button_down && GetCapture() != this)
-		_viewport->cancel_drag();
-	*/
 
 	if (_viewport->button_down) {
 		if (abs(_markingBox.x1 - _markingBox.x2) > 1 || abs(_markingBox.y1 - _markingBox.y2) > 1) {
@@ -378,6 +340,7 @@ void RenderWidget::mouseReleaseEvent(QMouseEvent* event) {
 					_viewport->drag_rotate_objects(0, 0);
 				}
 
+				fred->autosave("object move");
 				fred->missionChanged();
 
 			} else {
@@ -385,29 +348,24 @@ void RenderWidget::mouseReleaseEvent(QMouseEvent* event) {
 			}
 		}
 
-		if (_viewport->Bg_bitmap_dialog) {
-			_usingMarkingBox = true;
+		if (_usingMarkingBox) {
+			_viewport->select_objects(_markingBox);
+			_usingMarkingBox = false;
 
-		} else {
-			if (_usingMarkingBox) {
-				_viewport->select_objects(_markingBox);
-				_usingMarkingBox = 0;
-
-			} else if ((!_viewport->moved && _viewport->on_object != -1) && !_viewport->Selection_lock
-				&& !event->modifiers().testFlag(Qt::ShiftModifier)) {
-				fred->unmark_all();
-				fred->markObject(_viewport->on_object);
-			}
+		} else if ((!_viewport->moved && _viewport->on_object != -1) && !_viewport->Selection_lock
+			&& !event->modifiers().testFlag(Qt::ShiftModifier)) {
+			fred->unmark_all();
+			fred->markObject(_viewport->on_object);
 		}
 
 		_viewport->button_down = false;
 		_viewport->needsUpdate();
+
 		if (_viewport->Dup_drag == EditorViewport::DUP_DRAG_OF_WING) {
-			char msg[256];
 			int ship;
 			object* objp;
 
-			sprintf(msg, "Add cloned ships to wing %s?", Wings[_viewport->Duped_wing].name);
+			QString msg = tr("Add cloned ships to wing %1?").arg(Wings[_viewport->Duped_wing].name);
 			if (QMessageBox::question(this, tr("Query"), msg) == QMessageBox::Yes) {
 				objp = GET_FIRST(&obj_used_list);
 				while (objp != END_OF_LIST(&obj_used_list)) {
@@ -421,9 +379,7 @@ void RenderWidget::mouseReleaseEvent(QMouseEvent* event) {
 						Assert(objp->type == OBJ_SHIP);
 						ship = objp->instance;
 						Assert(Ships[ship].wingnum == -1);
-						wing_bash_ship_name(Ships[ship].ship_name,
-											Wings[_viewport->Duped_wing].name,
-											Wings[_viewport->Duped_wing].wave_count + 1);
+						wing_bash_ship_name(&Ships[ship], &Wings[_viewport->Duped_wing], Wings[_viewport->Duped_wing].wave_count + 1, true);
 
 						Wings[_viewport->Duped_wing].ship_index[Wings[_viewport->Duped_wing].wave_count] = ship;
 						Ships[ship].wingnum = _viewport->Duped_wing;
@@ -438,18 +394,6 @@ void RenderWidget::mouseReleaseEvent(QMouseEvent* event) {
 			}
 		}
 	}
-
-	/*
-	TODO: Briefing dialog related stuff
-	if (query_valid_object() && (Marked == 1) && (Objects[cur_object_index].type == OBJ_POINT)) {
-		Assert(Briefing_dialog);
-		Briefing_dialog->icon_select(Objects[cur_object_index].instance);
-
-	} else {
-		if (Briefing_dialog)
-			Briefing_dialog->icon_select(-1);
-	}
-	 */
 }
 void RenderWidget::updateCursor() const {
 	if (_viewport->Cursor_over >= 0) {
@@ -484,7 +428,6 @@ void RenderWidget::setCursorMode(CursorMode mode) {
 	_cursorMode = mode;
 }
 void RenderWidget::renderFrame() {
-	_viewport->renderer->render_frame(fred->currentObject, fred->Render_subsys, _usingMarkingBox, _markingBox, false);
+	_viewport->renderer->render_frame(fred->currentObject, fred->Render_subsys, _usingMarkingBox, _markingBox);
 }
-} // namespace fred
-} // namespace fso
+} // namespace fso::fred
