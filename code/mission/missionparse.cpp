@@ -7457,9 +7457,9 @@ bool parse_main(const char *mission_name, int flags)
 					throw parse::ParseException("Filename does not have an .xwi or .brf extension");
 
 				// import the mission proper, followed by the briefing
-				read_file_bytes(temp_filename, CF_TYPE_ANY);
+				int xwim_len = read_file_bytes(temp_filename, CF_TYPE_ANY);
 				XWingMission xwim;
-				if (!XWingMission::load(&xwim, Parse_text_raw))
+				if (!XWingMission::load(&xwim, Parse_text_raw, static_cast<size_t>(xwim_len)))
 					throw parse::ParseException("Could not parse XWI mission!");
 				rval = parse_mission(&The_mission, &xwim, flags);
 
@@ -7468,9 +7468,10 @@ bool parse_main(const char *mission_name, int flags)
 					strcpy(ch, ".BRF");
 					try
 					{
-						read_file_bytes(temp_filename, CF_TYPE_ANY);
+						int xwib_len = read_file_bytes(temp_filename, CF_TYPE_ANY);
 						XWingBriefing xwib;
-						XWingBriefing::load(&xwib, Parse_text_raw);
+						if (!XWingBriefing::load(&xwib, Parse_text_raw, static_cast<size_t>(xwib_len)))
+							throw parse::ParseException("Could not parse XWI briefing!");
 						parse_xwi_briefing(&The_mission, &xwib);
 					}
 					catch (const parse::ParseException& e)

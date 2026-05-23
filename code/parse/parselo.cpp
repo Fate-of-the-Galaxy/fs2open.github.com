@@ -2688,7 +2688,7 @@ void debug_show_mission_text()
 }
 
 // Goober5000
-void read_file_bytes(const char *filename, int mode, char *raw_bytes)
+int read_file_bytes(const char *filename, int mode, char *raw_bytes)
 {
 	CFILE	*mf;
 
@@ -2733,6 +2733,8 @@ void read_file_bytes(const char *filename, int mode, char *raw_bytes)
 	raw_bytes[file_len] = EOF;
 
 	cfclose(mf);
+
+	return file_len;
 }
 
 // Returns whether the first character encountered in str that is not whitespace is the character to look for.
