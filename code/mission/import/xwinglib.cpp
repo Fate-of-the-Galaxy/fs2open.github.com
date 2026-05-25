@@ -156,6 +156,8 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 	m->completionMsg2 = xwi_safe_string(h->completion_msg_2);
 	m->completionMsg3 = xwi_safe_string(h->completion_msg_3);
 
+	int unnamed_fgs = 0;
+
 	for (int n = 0; n < h->number_of_flight_groups; n++)
 	{
 		if (!has_room(p, end, sizeof(xwi_flightgroup)))
@@ -165,6 +167,15 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 		XWMFlightGroup *nfg = &nfg_buf;
 
 		nfg->designation = xwi_safe_string(fg->designation);
+
+		// flight groups must have a designation
+		if (nfg->designation.empty())
+		{
+			// use a synthetic name if the BRF/XWI gave it a blank designation (LEVEL1.XWI has one such FG)
+			nfg->designation = "Unnamed FG ";
+			nfg->designation += static_cast<char>('A' + unnamed_fgs++);
+		}
+
 		nfg->cargo = xwi_safe_string(fg->cargo);
 		nfg->specialCargo = xwi_safe_string(fg->special_cargo);
 		nfg->specialShipNumber = fg->special_ship_number;
