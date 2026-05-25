@@ -33,11 +33,40 @@ int get_sexp_xwing(const SCP_string &sexp_buf)
 	return get_sexp_main();
 }
 
+// Locate the player's flight group in the current XWI mission.  Returns 0 if
+// none is marked (with a warning) so the static `Player_flight_group` is always
+// a valid index for the *current* mission, never a stale value from a previous
+// batch-import iteration.
+static int xwi_find_player_flight_group(const XWingMission *xwim)
+{
+	int index = -1;
+	for (int i = 0; i < (int)xwim->flightgroups.size(); i++)
+	{
+		if (xwim->flightgroups[i].playerPos > 0)
+		{
+			index = i;
+			// don't break in case multiple FGs set a player - we will use the last one assigned
+		}
+	}
+	if (index >= 0)
+		return index;
+
+	Warning(LOCATION, "Player flight group not found?");
+	return 0;
+}
+
 // vazor222
 void parse_xwi_mission_info(mission *pm, const XWingMission *xwim)
 {
 	pm->author = "X-Wing";
 	strcpy_s(pm->created, "00/00/00 at 00:00:00");
+
+	// Re-derive the player flight group from the current mission.  The static
+	// would otherwise hold a stale index from the previous batch-import
+	// iteration, and we use it immediately below.
+	Player_flight_group = xwi_find_player_flight_group(xwim);
+	if (xwim->flightgroups.empty() || Player_flight_group >= (int)xwim->flightgroups.size())
+		return;
 
 	// NOTE: Y and Z are swapped and the units are in km
 	Parse_viewer_pos.xyz.x = 1000 * xwim->flightgroups[Player_flight_group].start1_x;
@@ -1196,13 +1225,20 @@ void post_parse_consolidate_similar_wings()
 		Warning(LOCATION, "%s", msg.c_str());
 	}
 
-	// and now delete any leftover wings
-	for (int wingnum = 0; wingnum < Num_wings; ++wingnum)
+	// and now delete any leftover wings.  We use a while loop (not a for loop)
+	// because after sliding wings down past `wingnum`, the wing that slid into
+	// position `wingnum` still needs to be checked -- it might itself be a
+	// leftover that another iteration of consolidation produced.
+	int wingnum = 0;
+	while (wingnum < Num_wings)
 	{
 		// a leftover wing is one that is in range but has a blank name
 		auto leftover_wingp = &Wings[wingnum];
 		if (*leftover_wingp->name != '\0')
+		{
+			++wingnum;
 			continue;
+		}
 
 		free_sexp2(leftover_wingp->arrival_cue);
 		free_sexp2(leftover_wingp->departure_cue);
@@ -1213,13 +1249,32 @@ void post_parse_consolidate_similar_wings()
 		Wings[Num_wings-1].clear();
 		--Num_wings;
 
-		// any wing references higher than this wing should be adjusted
+		// Any wing references higher than this wing must be adjusted; any
+		// reference equal to this wing should not exist (the merge phase
+		// should have re-parented every pobj of a leftover wing to its stem).
+		// If one slipped through, log identifying info, orphan it (wingnum =
+		// -1 makes it a singleton ship instead of crashing the batch), and
+		// continue.  This is defensive: an Assertion crash here aborts the
+		// whole batch import, but the underlying mission can usually still be
+		// converted with the orphan singleton as a minor inaccuracy.
 		for (auto &pobj : Parse_objects)
 		{
-			Assertion(pobj.wingnum != wingnum, "There should not be any more references to leftover wing %d!", wingnum);
-			if (pobj.wingnum > wingnum)
+			if (pobj.wingnum == wingnum)
+			{
+				Warning(LOCATION,
+					"Parse object '%s' (pos_in_wing=%d) still references leftover wing %d after consolidation; setting its wingnum to -1.  "
+					"This may indicate a flight-group naming pattern the consolidator didn't expect; please report the source mission.",
+					pobj.name, pobj.pos_in_wing, wingnum);
+				pobj.wingnum = -1;
+			}
+			else if (pobj.wingnum > wingnum)
+			{
 				--pobj.wingnum;
+			}
 		}
+
+		// Don't advance wingnum -- the slide put a different wing at this slot
+		// and it might also be a leftover.
 	}
 }
 
@@ -1268,25 +1323,11 @@ void post_parse_disambiguate_ships()
 
 void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 {
-	int index = -1;
 	SCP_string sexp_buf;
 
-	// find player flight group
-	for (int i = 0; i < (int)xwim->flightgroups.size(); i++)
-	{
-		if (xwim->flightgroups[i].playerPos > 0)
-		{
-			index = i;
-			// don't break in case multiple FGs set a player - we will use the last one assigned
-		}
-	}
-	if (index >= 0)
-		Player_flight_group = index;
-	else
-	{
-		Warning(LOCATION, "Player flight group not found?");
-		Player_flight_group = 0;
-	}
+	// Should match what parse_xwi_mission_info already set, but recompute
+	// defensively in case _info wasn't called for this mission.
+	Player_flight_group = xwi_find_player_flight_group(xwim);
 
 	Do_not_reposition_wings.clear();
 
