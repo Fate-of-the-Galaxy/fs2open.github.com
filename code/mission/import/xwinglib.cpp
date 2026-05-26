@@ -4,7 +4,8 @@
 #include "xwinglib.h"
 
 #pragma pack(push, 1)
-struct xwi_header {
+struct xwi_header
+{
 	short version;
 	short mission_time_limit;
 	short end_event;
@@ -17,7 +18,8 @@ struct xwi_header {
 	short number_of_objects;
 };
 
-struct xwi_flightgroup {
+struct xwi_flightgroup
+{
 	char designation[16];
 	char cargo[16];
 	char special_cargo[16];
@@ -73,7 +75,8 @@ struct xwi_flightgroup {
 	short secondary_target;
 };
 
-struct xwi_objectgroup {
+struct xwi_objectgroup
+{
 	char designation[16];   // ignored?
 	char cargo[16];         // ignored?
 	char special_cargo[16]; // ignored?
@@ -118,7 +121,8 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 
 	m->missionTimeLimit = h->mission_time_limit;
 
-	switch (h->end_event) {
+	switch (h->end_event)
+	{
 		case 0:
 			m->endEvent = XWMEndEvent::ev_rescued;
 			break;
@@ -134,7 +138,8 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 
 	m->rnd_seed = h->rnd_seed;
 	
-	switch(h->mission_location) {
+	switch(h->mission_location)
+	{
 		case 0:
 			m->missionLocation = XWMMissionLocation::ml_deep_space;
 			break;
@@ -151,7 +156,10 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 	m->completionMsg2 = xwi_safe_string(h->completion_msg_2);
 	m->completionMsg3 = xwi_safe_string(h->completion_msg_3);
 
-	for (int n = 0; n < h->number_of_flight_groups; n++) {
+	int unnamed_fgs = 0;
+
+	for (int n = 0; n < h->number_of_flight_groups; n++)
+	{
 		if (!has_room(p, end, sizeof(xwi_flightgroup)))
 			return false;
 		auto fg = reinterpret_cast<const xwi_flightgroup *>(p);
@@ -159,6 +167,15 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 		XWMFlightGroup *nfg = &nfg_buf;
 
 		nfg->designation = xwi_safe_string(fg->designation);
+
+		// flight groups must have a designation
+		if (nfg->designation.empty())
+		{
+			// use a synthetic name if the BRF/XWI gave it a blank designation (LEVEL1.XWI has one such FG)
+			nfg->designation = "Unnamed FG ";
+			nfg->designation += static_cast<char>('A' + unnamed_fgs++);
+		}
+
 		nfg->cargo = xwi_safe_string(fg->cargo);
 		nfg->specialCargo = xwi_safe_string(fg->special_cargo);
 		nfg->specialShipNumber = fg->special_ship_number;
@@ -166,7 +183,8 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 		// The Y-Wing-to-B-Wing reinterpretation below may need to mutate craft_status; keep it local so the buffer stays const
 		short craft_status = fg->craft_status;
 
-		switch(fg->flight_group_type) {
+		switch(fg->flight_group_type)
+		{
 			case 0:
 				nfg->flightGroupType = XWMFlightGroupType::fg_None;
 				break;
@@ -240,7 +258,8 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 				return false;
 		}
 
-		switch(fg->craft_iff) {
+		switch(fg->craft_iff)
+		{
 			case 0:
 				nfg->craftIFF = XWMCraftIFF::iff_default;
 				break;
@@ -255,7 +274,8 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 				break;
 		}
 
-		switch(craft_status) {
+		switch(craft_status)
+		{
 			case 0:
 				nfg->craftStatus = XWMCraftStatus::cs_normal;
 				break;
@@ -291,7 +311,8 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 		nfg->numberInWave = fg->number_in_wave;
 		nfg->numberOfWaves = fg->number_of_waves + 1;
 
-		switch(fg->arrival_event) {
+		switch(fg->arrival_event)
+		{
 			case 0:
 				nfg->arrivalEvent = XWMArrivalEvent::ae_mission_start;
 				break;
@@ -324,29 +345,29 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 		nfg->arriveByHyperspace = (fg->arrive_by_hyperspace != 0);
 		nfg->departByHyperspace = (fg->depart_by_hyperspace != 0);
 
-		nfg->start1_x = fg->start1_x / 160.0f;
-		nfg->start2_x = fg->start2_x / 160.0f;
-		nfg->start3_x = fg->start3_x / 160.0f;
-		nfg->start1_y = fg->start1_y / 160.0f;
-		nfg->start2_y = fg->start2_y / 160.0f;
-		nfg->start3_y = fg->start3_y / 160.0f;
-		nfg->start1_z = fg->start1_z / 160.0f;
-		nfg->start2_z = fg->start2_z / 160.0f;
-		nfg->start3_z = fg->start3_z / 160.0f;
+		nfg->start1_x = fg->start1_x / XWING_UNITS_PER_KM;
+		nfg->start2_x = fg->start2_x / XWING_UNITS_PER_KM;
+		nfg->start3_x = fg->start3_x / XWING_UNITS_PER_KM;
+		nfg->start1_y = fg->start1_y / XWING_UNITS_PER_KM;
+		nfg->start2_y = fg->start2_y / XWING_UNITS_PER_KM;
+		nfg->start3_y = fg->start3_y / XWING_UNITS_PER_KM;
+		nfg->start1_z = fg->start1_z / XWING_UNITS_PER_KM;
+		nfg->start2_z = fg->start2_z / XWING_UNITS_PER_KM;
+		nfg->start3_z = fg->start3_z / XWING_UNITS_PER_KM;
 
-		nfg->waypoint1_x = fg->wp1_x / 160.0f;
-		nfg->waypoint2_x = fg->wp2_x / 160.0f;
-		nfg->waypoint3_x = fg->wp3_x / 160.0f;
-		nfg->waypoint1_y = fg->wp1_y / 160.0f;
-		nfg->waypoint2_y = fg->wp2_y / 160.0f;
-		nfg->waypoint3_y = fg->wp3_y / 160.0f;
-		nfg->waypoint1_z = fg->wp1_z / 160.0f;
-		nfg->waypoint2_z = fg->wp2_z / 160.0f;
-		nfg->waypoint3_z = fg->wp3_z / 160.0f;
+		nfg->waypoint1_x = fg->wp1_x / XWING_UNITS_PER_KM;
+		nfg->waypoint2_x = fg->wp2_x / XWING_UNITS_PER_KM;
+		nfg->waypoint3_x = fg->wp3_x / XWING_UNITS_PER_KM;
+		nfg->waypoint1_y = fg->wp1_y / XWING_UNITS_PER_KM;
+		nfg->waypoint2_y = fg->wp2_y / XWING_UNITS_PER_KM;
+		nfg->waypoint3_y = fg->wp3_y / XWING_UNITS_PER_KM;
+		nfg->waypoint1_z = fg->wp1_z / XWING_UNITS_PER_KM;
+		nfg->waypoint2_z = fg->wp2_z / XWING_UNITS_PER_KM;
+		nfg->waypoint3_z = fg->wp3_z / XWING_UNITS_PER_KM;
 
-		nfg->hyperspace_x = fg->hyp_x / 160.0f;
-		nfg->hyperspace_y = fg->hyp_y / 160.0f;
-		nfg->hyperspace_z = fg->hyp_z / 160.0f;
+		nfg->hyperspace_x = fg->hyp_x / XWING_UNITS_PER_KM;
+		nfg->hyperspace_y = fg->hyp_y / XWING_UNITS_PER_KM;
+		nfg->hyperspace_z = fg->hyp_z / XWING_UNITS_PER_KM;
 
 		nfg->start1_enabled = (fg->start1_enabled != 0);
 		nfg->start2_enabled = (fg->start2_enabled != 0);
@@ -356,7 +377,8 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 		nfg->waypoint3_enabled = (fg->wp3_enabled != 0);
 		nfg->hyperspace_enabled = (fg->hyp_enabled != 0);
 
-		switch(fg->formation) {
+		switch(fg->formation)
+		{
 			case 0:
 				nfg->formation = XWMFormation::f_Vic;
 				break;
@@ -399,7 +421,8 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 
 		nfg->playerPos = fg->player_pos;
 
-		switch(fg->craft_ai) {
+		switch(fg->craft_ai)
+		{
 			case 0:
 				nfg->craftAI = XWMCraftAI::ai_Rookie;
 				break;
@@ -419,7 +442,8 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 				return false;
 		}
 
-		switch(fg->order) {
+		switch(fg->order)
+		{
 			case 0:
 				nfg->craftOrder = XWMCraftOrder::o_Hold_Steady;
 				break;
@@ -527,7 +551,8 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 		nfg->dockTime = fg->dock_time_or_throttle;
 		nfg->Throttle = fg->dock_time_or_throttle;
 
-		switch(fg->craft_markings1) {
+		switch(fg->craft_markings1)
+		{
 			case 0:
 				nfg->craftColor = XWMCraftColor::c_Red;
 				break;
@@ -546,7 +571,8 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 
 		nfg->craftMarkings = fg->craft_markings2;
 
-		switch(fg->objective) {
+		switch(fg->objective)
+		{
 			case 0:
 				nfg->objective = XWMObjective::o_None;
 				break;
@@ -603,10 +629,13 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 		}
 
 		// XXX LEVEL1.XWI seems to set primaryTarget to junk
-		if (nfg->objective == XWMObjective::o_None) {
+		if (nfg->objective == XWMObjective::o_None)
+		{
 			nfg->primaryTarget = -1;
 			nfg->secondaryTarget = -1;
-		} else {
+		}
+		else
+		{
 			nfg->primaryTarget = fg->primary_target;
 			nfg->secondaryTarget = fg->secondary_target;
 		}
@@ -618,14 +647,16 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 		p += sizeof(xwi_flightgroup);
 	}
 
-	for (int n = 0; n < h->number_of_objects; n++) {
+	for (int n = 0; n < h->number_of_objects; n++)
+	{
 		if (!has_room(p, end, sizeof(xwi_objectgroup)))
 			return false;
 		auto oj = reinterpret_cast<const xwi_objectgroup *>(p);
 		XWMObject noj_buf;
 		XWMObject *noj = &noj_buf;
 
-		switch (oj->object_type) {
+		switch (oj->object_type)
+		{
 			case 18:
 				noj->objectType = XWMObjectType::oj_Mine1;
 				break;
@@ -759,21 +790,24 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 				return false;
 		}
 
-		if (oj->object_type >= 58) {
+		if (oj->object_type >= 58)
+		{
 			noj->objectGoal = XWMObjectGoal::ojg_Neither;
 			noj->formation = XWMObjectFormation::ojf_FloorXY;
 			// TODO : If the object is a Training Platform then the object_formation determines
 			// which guns are present and also how many seconds on the clock for the missions.
-		} else {
-			if (oj->object_formation & 0x4) {
+		}
+		else
+		{
+			if (oj->object_formation & 0x4)
 				noj->objectGoal = XWMObjectGoal::ojg_Destroyed;
-			} else if (oj->object_formation & 0x8) {
+			else if (oj->object_formation & 0x8)
 				noj->objectGoal = XWMObjectGoal::ojg_Survive;
-			} else {
+			else
 				noj->objectGoal = XWMObjectGoal::ojg_Neither;
-			}
 
-			switch (oj->object_formation & ~(0x4 | 0x8)) {
+			switch (oj->object_formation & ~(0x4 | 0x8))
+			{
 				case 0:
 					noj->formation = XWMObjectFormation::ojf_FloorXY;
 					break;
@@ -793,9 +827,9 @@ bool XWingMission::load(XWingMission *m, const char *data, size_t length)
 
 		noj->numberOfObjects = oj->number_of_objects;
 
-		noj->object_x = oj->object_x / 160.0f;
-		noj->object_y = oj->object_y / 160.0f;
-		noj->object_z = oj->object_z / 160.0f;
+		noj->object_x = oj->object_x / XWING_UNITS_PER_KM;
+		noj->object_y = oj->object_y / XWING_UNITS_PER_KM;
+		noj->object_z = oj->object_z / XWING_UNITS_PER_KM;
 		noj->object_yaw = oj->object_yaw;
 		noj->object_pitch = oj->object_pitch;
 		noj->object_roll = oj->object_roll - 90.0f;

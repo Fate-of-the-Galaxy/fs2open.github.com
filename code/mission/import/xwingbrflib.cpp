@@ -186,9 +186,9 @@ bool XWingBriefing::load(XWingBriefing *b, const char *data, size_t length)
 			if (!has_room(p, end, sizeof(xwi_brf_coord)))
 				return false;
 			auto raw = reinterpret_cast<const xwi_brf_coord *>(p);
-			coords[i].x = raw->x / 160.0f;
-			coords[i].y = raw->y / 160.0f;
-			coords[i].z = raw->z / 160.0f;
+			coords[i].x = raw->x / XWING_UNITS_PER_KM;
+			coords[i].y = raw->y / XWING_UNITS_PER_KM;
+			coords[i].z = raw->z / XWING_UNITS_PER_KM;
 			p += sizeof(xwi_brf_coord);
 		}
 	}
