@@ -703,8 +703,9 @@ void CFREDDoc::OnFileImportXWI()
 		if (ch != NULL)
 			*ch = '\0';
 
-		// assign this as the mission name
-		The_mission.name = filename;
+		// use this as a fallback for the mission title
+		if (The_mission.name.empty())
+			The_mission.name = filename;
 
 		// add new extension
 		strcat_s(filename, ".fs2");
