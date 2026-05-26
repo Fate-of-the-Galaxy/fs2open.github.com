@@ -16,6 +16,8 @@ std::string xwi_safe_string(const char (&buf)[N])
 // during parsing of binary files, check to see if the next chunk of data is present
 bool has_room(const char *p, const char *end, size_t n);
 
+constexpr float XWING_UNITS_PER_KM = 160.0f;
+
 enum class XWMFlightGroupType : short
 {
 	fg_None = 0,

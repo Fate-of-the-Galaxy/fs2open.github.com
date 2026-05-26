@@ -340,7 +340,8 @@ const char *xwi_determine_team(const XWingMission *xwim, const XWMFlightGroup *f
 	if (fg->craftIFF == XWMCraftIFF::iff_neutral)
 		return "Civilian";
 
-	switch (fg->flightGroupType) {
+	switch (fg->flightGroupType)
+	{
 		case XWMFlightGroupType::fg_X_Wing:
 		case XWMFlightGroupType::fg_Y_Wing:
 		case XWMFlightGroupType::fg_A_Wing:
@@ -657,36 +658,37 @@ void parse_xwi_flightgroup(mission *pm, const XWingMission *xwim, const XWMFligh
 
 const char *xwi_determine_object_class(const XWMObject *oj)
 {
-	switch (oj->objectType) {
-	case XWMObjectType::oj_Mine1:
-	case XWMObjectType::oj_Mine2:
-	case XWMObjectType::oj_Mine3:
-	case XWMObjectType::oj_Mine4:
-		return "Defense Mine#Ion";
-	case XWMObjectType::oj_Satellite:
-		return "Sensor Satellite#Imp";
-	case XWMObjectType::oj_Nav_Buoy:
-		return "Nav Buoy#real";
-	case XWMObjectType::oj_Probe:
-		return "Sensor Probe";
-	case XWMObjectType::oj_Asteroid1:
-		return "Asteroid#Small01";
-	case XWMObjectType::oj_Asteroid2:
-		return "Asteroid#Small02";
-	case XWMObjectType::oj_Asteroid3:
-		return "Asteroid#Medium01";
-	case XWMObjectType::oj_Asteroid4:
-		return "Asteroid#Medium02";
-	case XWMObjectType::oj_Asteroid5:
-		return "Asteroid#Medium03";
-	case XWMObjectType::oj_Asteroid6:
-		return "Asteroid#Big01";
-	case XWMObjectType::oj_Asteroid7:
-		return "Asteroid#Big02";
-	case XWMObjectType::oj_Asteroid8:
-		return "Asteroid#Big03";
-	default:
-		break;
+	switch (oj->objectType)
+	{
+		case XWMObjectType::oj_Mine1:
+		case XWMObjectType::oj_Mine2:
+		case XWMObjectType::oj_Mine3:
+		case XWMObjectType::oj_Mine4:
+			return "Defense Mine#Ion";
+		case XWMObjectType::oj_Satellite:
+			return "Sensor Satellite#Imp";
+		case XWMObjectType::oj_Nav_Buoy:
+			return "Nav Buoy#real";
+		case XWMObjectType::oj_Probe:
+			return "Sensor Probe";
+		case XWMObjectType::oj_Asteroid1:
+			return "Asteroid#Small01";
+		case XWMObjectType::oj_Asteroid2:
+			return "Asteroid#Small02";
+		case XWMObjectType::oj_Asteroid3:
+			return "Asteroid#Medium01";
+		case XWMObjectType::oj_Asteroid4:
+			return "Asteroid#Medium02";
+		case XWMObjectType::oj_Asteroid5:
+			return "Asteroid#Medium03";
+		case XWMObjectType::oj_Asteroid6:
+			return "Asteroid#Big01";
+		case XWMObjectType::oj_Asteroid7:
+			return "Asteroid#Big02";
+		case XWMObjectType::oj_Asteroid8:
+			return "Asteroid#Big03";
+		default:
+			break;
 	}
 	return nullptr;
 }
@@ -694,17 +696,19 @@ const char *xwi_determine_object_class(const XWMObject *oj)
 vec3d xwi_determine_mine_formation_position(const XWMObject* oj, float objectPosX, float objectPosY, float objectPosZ, 
 	float offsetAxisA, float offsetAxisB)
 {
-	switch (oj->formation) {  // Y and Z axes must be switched for FSO
-	case XWMObjectFormation::ojf_FloorXY:
-		return vm_vec_new((objectPosX + offsetAxisA), objectPosZ, (objectPosY + offsetAxisB));
-	case XWMObjectFormation::ojf_SideYZ:
-		return vm_vec_new(objectPosX, (objectPosZ + offsetAxisA), (objectPosY + offsetAxisB));
-	case XWMObjectFormation::ojf_FrontXZ:
-		return vm_vec_new((objectPosX + offsetAxisA), (objectPosZ + offsetAxisB), objectPosY);
-	case XWMObjectFormation::ojf_Scattered:
-		return vm_vec_new(objectPosX, objectPosZ, objectPosY);
-	default:
-		break;
+	switch (oj->formation)
+	{
+		// Y and Z axes must be switched for FSO
+		case XWMObjectFormation::ojf_FloorXY:
+			return vm_vec_new((objectPosX + offsetAxisA), objectPosZ, (objectPosY + offsetAxisB));
+		case XWMObjectFormation::ojf_SideYZ:
+			return vm_vec_new(objectPosX, (objectPosZ + offsetAxisA), (objectPosY + offsetAxisB));
+		case XWMObjectFormation::ojf_FrontXZ:
+			return vm_vec_new((objectPosX + offsetAxisA), (objectPosZ + offsetAxisB), objectPosY);
+		case XWMObjectFormation::ojf_Scattered:
+			return vm_vec_new(objectPosX, objectPosZ, objectPosY);
+		default:
+			break;
 	}
 	return vm_vec_new(objectPosX, objectPosZ, objectPosY);
 }
@@ -729,11 +733,13 @@ const char *xwi_determine_space_object_name(SCP_set<SCP_string> &objectNameSet, 
 	end_string_at_first_hash_symbol(base_name);
 
 	// try to make the object group index part of the name too
-	if ((strlen(base_name) < NAME_LENGTH - 7) && (og_index < 26*26)) {
+	if ((strlen(base_name) < NAME_LENGTH - 7) && (og_index < 26*26))
+	{
 		strcat_s(base_name, " ");
 
 		int offset = og_index;
-		if (offset >= 26) {
+		if (offset >= 26)
+		{
 			sprintf(suffix, NOX("%c"), 'A' + (offset / 26) - 1);
 			strcat_s(base_name, suffix);
 			offset %= 26;
@@ -754,9 +760,8 @@ const char *xwi_determine_space_object_name(SCP_set<SCP_string> &objectNameSet, 
 
 		// if generated name will be longer than allowable name, truncate the class section of the name by the overflow
 		int char_overflow = static_cast<int>(strlen(base_name) + strlen(suffix)) - (NAME_LENGTH - 1);
-		if (char_overflow > 0) {
+		if (char_overflow > 0)
 			object_name[strlen(base_name) - static_cast<size_t>(char_overflow)] = '\0';
-		}
 
 		// complete building the name by adding suffix number and converting case
 		strcat_s(object_name, suffix);
@@ -804,7 +809,8 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 	xwi_determine_object_orient(&orient, oj);
 	
 	int ship_class = ship_info_lookup(class_name);
-	if (ship_class < 0) {
+	if (ship_class < 0)
+	{
 		Warning(LOCATION, "Unable to determine ship class for Object Group with type %s", class_name);
 		ship_class = 0;
 	}
@@ -812,30 +818,34 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 
 	int team = Species_info[sip->species].default_iff;
 
-	switch (oj->objectType) {
-	case XWMObjectType::oj_Mine1:
-	case XWMObjectType::oj_Mine2:
-	case XWMObjectType::oj_Mine3:
-	case XWMObjectType::oj_Mine4: {
-		auto team_name = "Hostile";
-		int index = iff_lookup(team_name);
-		if (index >= 0)
-			team = index;
-		else
-			Warning(LOCATION, "Could not find iff %s", team_name);
+	switch (oj->objectType)
+	{
+		case XWMObjectType::oj_Mine1:
+		case XWMObjectType::oj_Mine2:
+		case XWMObjectType::oj_Mine3:
+		case XWMObjectType::oj_Mine4:
+		{
+			auto team_name = "Hostile";
+			int index = iff_lookup(team_name);
+			if (index >= 0)
+				team = index;
+			else
+				Warning(LOCATION, "Could not find iff %s", team_name);
 
-		if (number_of_objects > 1) {
-			offsetAxisA -= (mine_dist / 2 * (number_of_objects - 1)); // (- the distance to centre the grid)
-			offsetAxisB -= (mine_dist / 2 * (number_of_objects - 1));
+			if (number_of_objects > 1)
+			{
+				offsetAxisA -= (mine_dist / 2 * (number_of_objects - 1)); // (- the distance to centre the grid)
+				offsetAxisB -= (mine_dist / 2 * (number_of_objects - 1));
+			}
+			break;
 		}
-		break;
-	}
-	default:
-		if (number_of_objects > 1) {
-			Warning(LOCATION, "NumberOfCraft of '%s' was %d but must be 1.", class_name, number_of_objects);
-			number_of_objects = 1;
-		}
-		break;
+		default:
+			if (number_of_objects > 1)
+			{
+				Warning(LOCATION, "NumberOfCraft of '%s' was %d but must be 1.", class_name, number_of_objects);
+				number_of_objects = 1;
+			}
+			break;
 	}
 
 	// Check that the Xwing game engine object limit is not exceeded with this object group
@@ -846,14 +856,14 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 	// Copy objects in Parse_objects to set for name checking below
 	// This only needs to be done fully once per object group then can be added to after each new object
 	SCP_set<SCP_string> objectNameSet;
-	for (int n = 0; n < (int)Parse_objects.size(); n++) {
+	for (int n = 0; n < (int)Parse_objects.size(); n++)
 		objectNameSet.insert(Parse_objects[n].name);
-	}
 
 	// Now begin to configure each object in the group (mines multiple)
-	for (int a = 0; a < number_of_objects; a++) { // make an a-b 2d grid from the mines
-		for (int b = 0; b < number_of_objects; b++) {  // populate the column with mines
-
+	for (int a = 0; a < number_of_objects; a++)	 // make an a-b 2d grid from the mines
+	{
+		for (int b = 0; b < number_of_objects; b++)  // populate the column with mines
+		{
 			// Convert the mine pos. (a,b) to the relavenat formation pos. ie. (x,y) or (z,y) etc
 			auto ojxyz = xwi_determine_mine_formation_position(oj, objectPosX, objectPosY, objectPosZ, offsetAxisA + (mine_dist * a), offsetAxisB + (mine_dist * b));
 
@@ -874,36 +884,41 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 			Assert(pobj.ship_max_hull_strength > 0.0f); // Goober5000: div-0 check (not shield because we might not have one)
 			pobj.max_shield_recharge = sip->max_shield_recharge;
 
-			switch (oj->objectType) {
-			case XWMObjectType::oj_Mine1:
-			case XWMObjectType::oj_Mine2:
-			case XWMObjectType::oj_Mine3:
-			case XWMObjectType::oj_Mine4: {
-				pobj.subsys_index = Subsys_index;
-				int this_subsys = allocate_subsys_status();
-				pobj.subsys_count++;
-				strcpy_s(Subsys_status[this_subsys].name, NOX("Pilot"));
+			switch (oj->objectType)
+			{
+				case XWMObjectType::oj_Mine1:
+				case XWMObjectType::oj_Mine2:
+				case XWMObjectType::oj_Mine3:
+				case XWMObjectType::oj_Mine4:
+				{
+					pobj.subsys_index = Subsys_index;
+					int this_subsys = allocate_subsys_status();
+					pobj.subsys_count++;
+					strcpy_s(Subsys_status[this_subsys].name, NOX("Pilot"));
 
-				if (mine_laser_index >= 0) {
-					for (int n = 0; n < sip->n_subsystems; n++) {
-						auto subsys = &sip->subsystems[n];
-						if (subsys->type == SUBSYSTEM_TURRET) {
-							this_subsys = allocate_subsys_status();
-							pobj.subsys_count++;
-							strcpy_s(Subsys_status[this_subsys].name, sip->subsystems[n].name);
+					if (mine_laser_index >= 0)
+					{
+						for (int n = 0; n < sip->n_subsystems; n++)
+						{
+							auto subsys = &sip->subsystems[n];
+							if (subsys->type == SUBSYSTEM_TURRET)
+							{
+								this_subsys = allocate_subsys_status();
+								pobj.subsys_count++;
+								strcpy_s(Subsys_status[this_subsys].name, sip->subsystems[n].name);
 
-							for (int bank = 0; bank < MAX_SHIP_PRIMARY_BANKS; bank++) {
-								if (subsys->primary_banks[bank] >= 0) {
-									Subsys_status[this_subsys].primary_banks[bank] = mine_laser_index;
+								for (int bank = 0; bank < MAX_SHIP_PRIMARY_BANKS; bank++)
+								{
+									if (subsys->primary_banks[bank] >= 0)
+										Subsys_status[this_subsys].primary_banks[bank] = mine_laser_index;
 								}
 							}
 						}
 					}
+					break;
 				}
-				break;
-			}
-			default:
-				break;
+				default:
+					break;
 			}
 
 			pobj.replacement_textures = sip->replacement_textures; // initialize our set with the ship class set, which may be empty
