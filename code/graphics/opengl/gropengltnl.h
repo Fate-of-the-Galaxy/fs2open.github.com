@@ -33,7 +33,7 @@ extern float shadow_neardist;
 extern float shadow_middist;
 extern float shadow_fardist;
 
-extern GLuint Shadow_map_texture;
+extern GLuint Shadow_map_depth_texture;
 
 struct opengl_vertex_bind {
 	vertex_format_data::vertex_format format;
@@ -43,7 +43,7 @@ struct opengl_vertex_bind {
 	opengl_vert_attrib::attrib_id attribute_id;
 };
 
-gr_buffer_handle gr_opengl_create_buffer(BufferType type, BufferUsageHint usage);
+gr_buffer_handle gr_opengl_create_buffer(BufferType type, BufferUsageHint usage, bool rt_capable);
 
 void opengl_bind_buffer_object(gr_buffer_handle handle);
 void gr_opengl_update_buffer_data(gr_buffer_handle handle, size_t size, const void* data);
@@ -54,6 +54,22 @@ void* gr_opengl_map_buffer(gr_buffer_handle handle);
 void gr_opengl_flush_mapped_buffer(gr_buffer_handle handle, size_t offset, size_t size);
 
 /**
+ * @brief Gives the bytes that all live vertex and index buffers hold
+ *
+ * The profiler overlay's memory panel shows this value as the "geometry" group. Uniform buffers
+ * and texture buffers are not part of it.
+ */
+size_t opengl_get_geometry_bytes();
+
+/**
+ * @brief Gives the bytes that the shadow map texture array holds
+ *
+ * The profiler overlay's memory panel adds this value to the "render targets" group. The function
+ * gives 0 when shadows are off.
+ */
+size_t opengl_get_shadow_map_bytes();
+
+/**
  * @brief Retrieves the OpenGL handle of a generic buffer handle
  * @param expected_type The expected type of the buffer. Mainly used for debug checking.
  * @param buffer_handle The handle of the generic buffer
@@ -62,6 +78,9 @@ void gr_opengl_flush_mapped_buffer(gr_buffer_handle handle, size_t offset, size_
 GLuint opengl_buffer_get_id(GLenum expected_type, gr_buffer_handle buffer_handle);
 
 void gr_opengl_update_transform_buffer(void* data, size_t size);
+
+void gr_opengl_render_shadow_draw(gr_buffer_handle ubo_handle, size_t ubo_offset, size_t ubo_size,
+                                   vertex_buffer* buffer, indexed_vertex_source* vert_src, size_t texi);
 
 void opengl_tnl_init();
 void opengl_tnl_shutdown();

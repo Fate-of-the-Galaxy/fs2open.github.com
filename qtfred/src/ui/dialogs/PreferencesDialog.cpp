@@ -6,9 +6,35 @@
 #include <QKeySequenceEdit>
 
 #include "ui/util/SignalBlockers.h"
+#include "ui/widgets/sexp_tree_view.h"
 
 namespace fso::fred::dialogs {
 namespace {
+
+int themeModeToIndex(ThemeMode mode)
+{
+	switch (mode) {
+	case ThemeMode::Light:
+		return 1;
+	case ThemeMode::Dark:
+		return 2;
+	case ThemeMode::System:
+		break;
+	}
+	return 0;
+}
+
+ThemeMode themeModeFromIndex(int index)
+{
+	switch (index) {
+	case 1:
+		return ThemeMode::Light;
+	case 2:
+		return ThemeMode::Dark;
+	default:
+		return ThemeMode::System;
+	}
+}
 
 class ControlKeySequenceEdit : public QKeySequenceEdit {
 public:
@@ -63,6 +89,8 @@ PreferencesDialog::~PreferencesDialog() = default;
 void PreferencesDialog::applyChanges() {
 	_model->apply();
 	_fredView->setIconSize(QSize(_model->getToolbarIconSize(), _model->getToolbarIconSize()));
+	_fredView->applyMenuLayout(_model->getClassicMenuLayout());
+	_fredView->restartAutosaveTimer();
 	_viewport->needsUpdate();
 }
 
@@ -85,14 +113,21 @@ void PreferencesDialog::updateUi() {
 
 	// General
 	ui->offerAutosaveRecovery->setChecked(_model->getOfferAutosaveRecovery());
+	ui->autosaveIntervalSeconds->setValue(_model->getAutosaveIntervalSeconds());
+	ui->sexpNumberEveryN->setValue(_model->getSexpNumberEveryN());
+	ui->createBakOnSave->setChecked(_model->getCreateBakOnSave());
 	ui->moveShipsWhenUndocking->setChecked(_model->getMoveShipsWhenUndocking());
 	ui->alwaysSaveDisplayNames->setChecked(_model->getAlwaysSaveDisplayNames());
 	ui->checkPotentialIssues->setChecked(_model->getCheckPotentialIssues());
 	ui->applyAutoCorrections->setChecked(_model->getApplyAutoCorrections());
-	ui->themeCombo->setCurrentIndex(_model->getDarkMode() ? 1 : 0);
+	ui->themeCombo->setCurrentIndex(themeModeToIndex(_model->getThemeMode()));
+	ui->dataMenuStyleCombo->setCurrentIndex(static_cast<int>(_model->getDataMenuStyle()));
+	ui->classicMenuLayout->setChecked(_model->getClassicMenuLayout());
 
 	const int iconSize = _model->getToolbarIconSize();
 	ui->toolbarIconSizeCombo->setCurrentIndex(iconSize <= 16 ? 0 : iconSize >= 32 ? 2 : 1);
+	ui->outlineLodCombo->setCurrentIndex(_model->getOutlineLod());
+	ui->labelFontScaleSpin->setValue(_model->getLabelFontScale());
 	ui->showSexpHelpMissionEvents->setChecked(_model->getShowSexpHelpMissionEvents());
 	ui->showSexpHelpMissionGoals->setChecked(_model->getShowSexpHelpMissionGoals());
 	ui->showSexpHelpMissionCutscenes->setChecked(_model->getShowSexpHelpMissionCutscenes());
@@ -115,6 +150,9 @@ void PreferencesDialog::updateUi() {
 	ui->gridCenterZ->setValue(_model->getGridCenterZ());
 
 	// Controls
+	ui->invertOrbitX->setChecked(_model->getInvertOrbitX());
+	ui->invertOrbitY->setChecked(_model->getInvertOrbitY());
+	ui->orbitSelectionMidpoint->setChecked(_model->getOrbitSelectionMidpoint());
 	for (const auto& entry : _controlEditors) {
 		entry.second->setKeySequence(_model->getControlKey(entry.first));
 	}
@@ -122,6 +160,21 @@ void PreferencesDialog::updateUi() {
 
 void PreferencesDialog::on_offerAutosaveRecovery_toggled(bool checked) {
 	_model->setOfferAutosaveRecovery(checked);
+}
+
+void PreferencesDialog::on_autosaveIntervalSeconds_valueChanged(int value) {
+	_model->setAutosaveIntervalSeconds(value);
+}
+
+void PreferencesDialog::on_sexpNumberEveryN_valueChanged(int value) {
+	_model->setSexpNumberEveryN(value);
+	// setSexpNumberEveryN -> modelChanged -> applyChanges -> apply() has already committed the
+	// new value to the viewport by now, so re-icon any open trees to renumber them live.
+	sexp_tree_view::refreshAllInstances();
+}
+
+void PreferencesDialog::on_createBakOnSave_toggled(bool checked) {
+	_model->setCreateBakOnSave(checked);
 }
 
 void PreferencesDialog::on_moveShipsWhenUndocking_toggled(bool checked) {
@@ -145,8 +198,24 @@ void PreferencesDialog::on_toolbarIconSizeCombo_currentIndexChanged(int index) {
 	_model->setToolbarIconSize(sizes[index]);
 }
 
+void PreferencesDialog::on_outlineLodCombo_currentIndexChanged(int index) {
+	_model->setOutlineLod(index);
+}
+
+void PreferencesDialog::on_labelFontScaleSpin_valueChanged(double value) {
+	_model->setLabelFontScale(value);
+}
+
 void PreferencesDialog::on_themeCombo_currentIndexChanged(int index) {
-	_model->setDarkMode(index == 1);
+	_model->setThemeMode(themeModeFromIndex(index));
+}
+
+void PreferencesDialog::on_dataMenuStyleCombo_currentIndexChanged(int index) {
+	_model->setDataMenuStyle(static_cast<DataMenuStyle>(index));
+}
+
+void PreferencesDialog::on_classicMenuLayout_toggled(bool checked) {
+	_model->setClassicMenuLayout(checked);
 }
 
 void PreferencesDialog::on_showSexpHelpMissionEvents_toggled(bool checked) {
@@ -197,6 +266,18 @@ void PreferencesDialog::on_gridCenterZ_valueChanged(int value) {
 
 void PreferencesDialog::on_resetGridButton_clicked() {
 	_model->resetGrid();
+}
+
+void PreferencesDialog::on_invertOrbitX_toggled(bool checked) {
+	_model->setInvertOrbitX(checked);
+}
+
+void PreferencesDialog::on_invertOrbitY_toggled(bool checked) {
+	_model->setInvertOrbitY(checked);
+}
+
+void PreferencesDialog::on_orbitSelectionMidpoint_toggled(bool checked) {
+	_model->setOrbitSelectionMidpoint(checked);
 }
 
 void PreferencesDialog::on_resetDefaultsButton_clicked() {

@@ -10,6 +10,7 @@
                 <section title="Concepts">
                     <section title="AI"              ref="concepts/ai.html"/>
                     <section title="Campaign Flow"   ref="concepts/campaign-flow.html"/>
+                    <section title="Custom Data"     ref="concepts/custom-data.html"/>
                     <section title="IFF &amp; Teams" ref="concepts/iff.html"/>
                     <section title="Messages"        ref="concepts/messages.html"/>
                     <section title="SEXPs"           ref="concepts/sexps.html"/>
@@ -36,6 +37,7 @@
                         <section title="Custom Strings"         ref="dialogs/CustomStringsDialog.html"/>
                         <section title="Custom Wing Names"      ref="dialogs/CustomWingNamesDialog.html"/>
                         <section title="Sound Environment"      ref="dialogs/SoundEnvironmentDialog.html"/>
+                        <section title="Support Options"        ref="dialogs/SupportRearmDialog.html"/>
                     </section>
                     <section title="Mission Statistics"         ref="dialogs/MissionStatsDialog.html"/>
                     <section title="Reinforcements"             ref="dialogs/ReinforcementsEditorDialog.html"/>
@@ -78,6 +80,7 @@
                     <section title="Error Checker"                  ref="dialogs/ErrorCheckerDialog.html"/>
                     <section title="Global Ship Flags"              ref="dialogs/GlobalShipFlagsDialog.html"/>
                     <section title="Music Player"                   ref="dialogs/MusicPlayerDialog.html"/>
+                    <section title="Reorder Objects"                ref="dialogs/ReorderDialog.html"/>
                     <section title="Voice Acting Manager"           ref="dialogs/VoiceActingManager.html"/>
                     <section title="Waypoint Path Generator"        ref="dialogs/WaypointPathGeneratorDialog.html"/>
                 </section>
@@ -91,6 +94,7 @@
             <keyword name="AI"                      id="concept.ai"                 ref="concepts/ai.html"/>
             <keyword name="Messages"                id="concept.messages"           ref="concepts/messages.html"/>
             <keyword name="Campaign Flow"           id="concept.campaignflow"       ref="concepts/campaign-flow.html"/>
+            <keyword name="Custom Data Concepts"    id="concept.customdata"         ref="concepts/custom-data.html"/>
             <keyword name="Viewport"                id="concept.viewport"           ref="general/Viewport.html"/>
             <keyword name="Toolbars"                id="concept.toolbar"            ref="general/Toolbars.html"/>
             <keyword name="Custom Data"             id="CustomDataDialog"           ref="dialogs/CustomDataDialog.html"/>
@@ -112,6 +116,7 @@
             <keyword name="Mission Events"          id="MissionEventsDialog"            ref="dialogs/MissionEventsDialog.html"/>
             <keyword name="Mission Goals"           id="MissionGoalsDialog"             ref="dialogs/MissionGoalsDialog.html"/>
             <keyword name="Mission Specs"           id="MissionSpecDialog"              ref="dialogs/MissionSpecsDialog.html"/>
+            <keyword name="Support Options"         id="SupportRearmDialog"             ref="dialogs/SupportRearmDialog.html"/>
             <keyword name="Custom Wing Names"       id="CustomWingNamesDialog"          ref="dialogs/CustomWingNamesDialog.html"/>
             <keyword name="Sound Environment"       id="SoundEnvironmentDialog"         ref="dialogs/SoundEnvironmentDialog.html"/>
             <keyword name="Custom Strings"          id="CustomStringsDialog"            ref="dialogs/CustomStringsDialog.html"/>
@@ -123,6 +128,7 @@
             <keyword name="Prop Editor"             id="PropEditorDialog"               ref="dialogs/PropEditorDialog.html"/>
             <keyword name="Calculate Relative Coordinates" id="RelativeCoordinatesDialog" ref="dialogs/RelativeCoordinatesDialog.html"/>
             <keyword name="Reinforcements"          id="ReinforcementsEditorDialog"     ref="dialogs/ReinforcementsEditorDialog.html"/>
+            <keyword name="Reorder Objects"         id="ReorderDialog"                  ref="dialogs/ReorderDialog.html"/>
             <keyword name="Shield System"           id="ShieldSystemDialog"             ref="dialogs/ShieldSystemDialog.html"/>
             <keyword name="Ship Editor"             id="ShipEditorDialog"               ref="dialogs/ShipEditorDialog.html"/>
             <keyword name="Ship Alt Class"          id="ShipAltShipClass"               ref="dialogs/ShipAltShipClass.html"/>
@@ -154,6 +160,7 @@
             <file>concepts/ai.html</file>
             <file>concepts/messages.html</file>
             <file>concepts/campaign-flow.html</file>
+            <file>concepts/custom-data.html</file>
             <file>dialogs/CustomDataDialog.html</file>
             <file>css/help.css</file>
             <file>dialogs/AsteroidEditorDialog.html</file>
@@ -175,6 +182,7 @@
             <file>dialogs/MissionEventsDialog.html</file>
             <file>dialogs/MissionGoalsDialog.html</file>
             <file>dialogs/MissionSpecsDialog.html</file>
+            <file>dialogs/SupportRearmDialog.html</file>
             <file>dialogs/CustomWingNamesDialog.html</file>
             <file>dialogs/CustomStringsDialog.html</file>
             <file>dialogs/SoundEnvironmentDialog.html</file>
@@ -185,6 +193,7 @@
             <file>dialogs/PropEditorDialog.html</file>
             <file>dialogs/ReinforcementsEditorDialog.html</file>
             <file>dialogs/RelativeCoordinatesDialog.html</file>
+            <file>dialogs/ReorderDialog.html</file>
             <file>dialogs/ShieldSystemDialog.html</file>
             <file>dialogs/ShipEditorDialog.html</file>
             <file>dialogs/ShipAltShipClass.html</file>

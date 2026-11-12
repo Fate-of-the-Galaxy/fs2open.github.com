@@ -39,6 +39,10 @@ QSurfaceFormat getSurfaceFormat(const os::ViewPortProperties& viewProps, const o
 	case os::OpenGLProfile::Compatibility:
 		format.setProfile(QSurfaceFormat::CompatibilityProfile);
 		break;
+	case os::OpenGLProfile::ES:
+		format.setProfile(QSurfaceFormat::NoProfile);
+		format.setRenderableType(QSurfaceFormat::OpenGLES);
+		break;
 	}
 
 	if (glAttrs.flags[os::OpenGLContextFlags::Debug]) {
@@ -61,7 +65,7 @@ namespace fred {
 
 
 QtGraphicsOperations::QtGraphicsOperations(Editor* editor) : _editor(editor) {
-	if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0) {
+	if ( !SDL_InitSubSystem(SDL_INIT_VIDEO) ) {
 		Error(LOCATION, "Couldn't init SDL video: %s", SDL_GetError());
 		return;
 	}

@@ -30,7 +30,6 @@ void ObjectOrientEditorDialog::accept()
 {
 	// If apply() returns true, close the dialog
 	if (_model->apply()) {
-		_viewport->editor->autosave("object editor");
 		QDialog::accept();
 	}
 	// else: validation failed, don't close
@@ -50,7 +49,15 @@ void ObjectOrientEditorDialog::reject()
 void ObjectOrientEditorDialog::closeEvent(QCloseEvent* e)
 {
 	reject();
-	e->ignore(); // Don't let the base class close the window
+	// reject() hides the dialog when it actually closes. Let that close
+	// proceed (so a dialog created with WA_DeleteOnClose is destroyed),
+	// and only veto it when reject() decided to keep the dialog open (e.g.
+	// the user cancelled the unsaved-changes prompt).
+	if (isVisible()) {
+		e->ignore();
+	} else {
+		e->accept();
+	}
 }
 
 void ObjectOrientEditorDialog::initializeUi()

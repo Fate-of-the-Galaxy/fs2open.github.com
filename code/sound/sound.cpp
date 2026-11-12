@@ -48,7 +48,7 @@ struct loaded_sound {
 SCP_vector<loaded_sound> Sounds;
 
 int Sound_enabled = FALSE;				// global flag to turn sound on/off
-size_t Snd_sram;								// mem (in bytes) used up by storing sounds in system memory
+size_t Snd_sram;								// bytes held in OpenAL sound-effect and music-streaming buffers
 
 float Default_sound_volume = 1.0f;		// range is 0 -> 1, used for non-music sound fx
 float Master_sound_volume = Default_sound_volume;
@@ -481,6 +481,8 @@ sound_load_id snd_load(game_snd_entry* entry, int *flags, int /*allow_hardware_l
 	return sound_load_id(static_cast<int>(n));
 }
 
+static SCP_set<sound_load_id> Unloaded_sound_ids;
+
 // ---------------------------------------------------------------------------------------
 // snd_unload() 
 //
@@ -503,6 +505,8 @@ int snd_unload(sound_load_id n)
 	auto& snd = Sounds[n.value()];
 
 	ds_unload_buffer(snd.sid);
+
+	Unloaded_sound_ids.emplace(n);
 
 	if (snd.sid != -1) {
 		Snd_sram -= snd.uncompressed_size;
@@ -530,6 +534,29 @@ void snd_unload_all()
 	while ( !Sounds.empty() ) {
 		snd_unload(sound_load_id((int)(Sounds.size() - 1)));
 	}
+	snd_unload_cleanup();
+}
+
+// If two tabled sounds share a sound file, unloading one will not correctly invalidate the index of the other,
+// causing a CTD when trying to play the other sound.
+// To fix this, every time we unload ANY sound, we must iterate over all tabled sounds, and invalidate their indices
+// if the given sound ID has been unloaded.
+void snd_unload_cleanup() {
+	for (auto& snd : Snds) {
+		for (auto& entry : snd.sound_entries) {
+			if (Unloaded_sound_ids.contains(entry.id)) {
+				entry.id = sound_load_id::invalid();
+			}
+		}
+	}
+	for (auto& snd : Snds_iface) {
+		for (auto& entry : snd.sound_entries) {
+			if (Unloaded_sound_ids.contains(entry.id)) {
+				entry.id = sound_load_id::invalid();
+			}
+		}
+	}
+	Unloaded_sound_ids.clear();
 }
 
 // ---------------------------------------------------------------------------------------
@@ -611,8 +638,8 @@ sound_handle snd_play(game_snd* gs, float pan, float vol_scale, int priority, bo
 	if (!ds_initialized)
 		return sound_handle::invalid();
 
+	Assertion(gs != nullptr, "gamesnd parameter must not be null!");
 	if (gs == nullptr) {
-		UNREACHABLE("gamesnd parameter must not be null!");
 		return sound_handle::invalid();
 	}
 	if (gs->flags & GAME_SND_NOT_VALID) {
@@ -704,8 +731,8 @@ sound_handle snd_play_3d(game_snd* gs, const vec3d* source_pos, const vec3d* lis
 	if (!ds_initialized)
 		return sound_handle::invalid();
 
+	Assertion(gs != nullptr, "gamesnd parameter must not be null!");
 	if (gs == nullptr) {
-		UNREACHABLE("gamesnd parameter must not be null!");
 		return sound_handle::invalid();
 	}
 	if (gs->flags & GAME_SND_NOT_VALID) {
@@ -921,8 +948,8 @@ sound_handle snd_play_looping(game_snd* gs, float pan, int /*start_loop*/, int /
 	if (!ds_initialized)
 		return sound_handle::invalid();
 
+	Assertion(gs != nullptr, "gamesnd parameter must not be null!");
 	if (gs == nullptr) {
-		UNREACHABLE("gamesnd parameter must not be null!");
 		return sound_handle::invalid();
 	}
 	if (gs->flags & GAME_SND_NOT_VALID) {
@@ -1363,6 +1390,13 @@ void snd_set_pos(sound_handle snd_handle, float val, int as_pct)
 int snd_num_playing()
 {
 	return ds_get_number_channels();
+}
+
+sound_memory_stats snd_get_memory_stats()
+{
+	sound_memory_stats stats;
+	stats.audio_buffer_bytes = Snd_sram;
+	return stats;
 }
 
 // Return the raw sound data for a loaded sound

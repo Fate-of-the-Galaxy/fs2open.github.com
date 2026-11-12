@@ -24,7 +24,7 @@ const char* getTypeStr(tracing::EventType type) {
 		case EventType::Counter:
 			return "C";
 		default: 
-			UNREACHABLE("Invalid enum value!");
+			UNREACHABLE("Invalid enum value %d!", static_cast<int>(type));
 			return "";
 	}
 }
@@ -88,7 +88,11 @@ void TraceEventWriter::processEvent(const trace_event* event) {
 		_out << ",\"id\":\"" << reinterpret_cast<const void*>(event->scope) << "\"";
 	}
 
-	_out << ",\"name\":\"" << event->category->getName() << "\",\"ph\":\"" << getTypeStr(event->type) << "\"";
+	// Read the name through the id, not event->category: this runs on the writer's background
+	// thread, well after the event was recorded, and the Category it names may already be dead
+	// (see trace_event::category_id).
+	_out << ",\"name\":\"" << Category::getNameById(event->category_id) << "\",\"ph\":\""
+		 << getTypeStr(event->type) << "\"";
 
 	switch (event->type) {
 		case EventType::Complete:
@@ -114,7 +118,7 @@ void TraceEventWriter::processEvent(const trace_event* event) {
 			break;
 		}
 		default:
-			UNREACHABLE("Unhandled enum value! This function should not have been called with this value!");
+			UNREACHABLE("Unhandled enum value %d! This function should not have been called with this value!", static_cast<int>(event->type));
 			break;
 	}
 

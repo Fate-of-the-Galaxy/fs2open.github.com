@@ -7,7 +7,7 @@
 #include <ship/ship.h>
 #include <playerman/player.h> // for max hotkeys
 #include <playerman/managepilot.h> // for squad logos
-#include "ui/widgets/sexp_tree.h"
+#include "ui/widgets/sexp_tree_view.h"
 
 #include "globalincs/pstypes.h"
 #include <utility>
@@ -38,6 +38,7 @@ class WingEditorDialogModel : public AbstractDialogModel {
 
 	bool arrivalIsDockBay() const;
 	bool arrivalNeedsTarget() const;
+	bool arrivalNeedsDistance() const;
 	bool departureIsDockBay() const;
 	bool departureNeedsTarget() const;
 	int getMaxWaveThreshold() const;
@@ -133,12 +134,14 @@ class WingEditorDialogModel : public AbstractDialogModel {
   private: // NOLINT(readability-redundant-access-specifiers)
 	void initializeData();
 	void reloadFromCurWing();
+	void scheduleReloadFromCurWing();
 	wing* getCurrentWing() const;
 	static SCP_vector<std::pair<SCP_string, bool>> getDockBayPathsForWingMask(uint32_t mask, int anchorShipnum);
 	void prepareSquadLogoList();
 
 	int _currentWingIndex = -1;
 	SCP_string _currentWingName;
+	bool _reloadPending = false;
 
 	SCP_vector<SCP_string> _squadLogoList;
 };

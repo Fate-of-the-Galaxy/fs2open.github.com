@@ -18,6 +18,7 @@
 extern int radar_target_id_flags;
 
 SCP_vector<iff_info> Iff_info;
+SCP_vector<const char *> Iff_info_names;		// to be filled in from Iff_info
 
 int Iff_traitor;
 
@@ -144,9 +145,13 @@ void resolve_iff_data()
 			Iff_info[Iff_traitor].iff_name);
 	}
 
+	Iff_info_names.clear();
+
 	// next get the attackees and colors
 	for (int cur_iff = 0; cur_iff < (int)Iff_info.size(); cur_iff++) {
 		iff_info* iff = &Iff_info[cur_iff];
+
+		Iff_info_names.push_back(iff->iff_name);
 
 		// clear the iffs to be attacked
 		iff->attackee_bitmask = 0;
@@ -578,16 +583,45 @@ void parse_iff_table(const char* filename)
 			}
 
             // get default ship flags
+			SCP_vector<SCP_string> unparsed_flags;
             if (optional_string("$Default Ship Flags:"))
             {
-                parse_string_flag_list(iffp->default_parse_flags, Parse_object_flags, Num_parse_object_flags, nullptr);
+                parse_string_flag_list(iffp->default_parse_flags, Parse_object_flags, Num_parse_object_flags, &unparsed_flags);
             }
 
             // again, for compatibility reasons
             if (optional_string("$Default Ship Flags2:"))
             {
-                parse_string_flag_list(iffp->default_parse_flags, Parse_object_flags, Num_parse_object_flags, nullptr);
+                parse_string_flag_list(iffp->default_parse_flags, Parse_object_flags, Num_parse_object_flags, &unparsed_flags);
             }
+
+			for (const auto &unparsed : unparsed_flags)
+			{
+				// catch typos or deprecations
+				if (!stricmp(unparsed.c_str(), "no-collide") || !stricmp(unparsed.c_str(), "no_collide"))
+					iffp->default_parse_flags.set(Mission::Parse_Object_Flags::OF_No_collide);
+				else if (!stricmp(unparsed.c_str(), "cannot-perform-scan"))
+					iffp->default_parse_flags.set(Mission::Parse_Object_Flags::SF_Cannot_perform_scan_hide_cargo);
+				else
+					error_display(0, "Unknown default ship flag for IFF %s: %s\n", iffp->iff_name, unparsed.c_str());
+			}
+
+			// these flags only make sense on individual ships
+			for (size_t idx = 0; idx < Num_parse_object_flags; ++idx)
+			{
+				auto flag = Parse_object_flags[idx].def;
+				if (flag != Mission::Parse_Object_Flags::AIF_No_dynamic
+					&& flag != Mission::Parse_Object_Flags::SF_Red_alert_store_status
+					&& flag != Mission::Parse_Object_Flags::Knossos_warp_in
+					&& flag != Mission::Parse_Object_Flags::OF_Player_start)
+					continue;
+
+				if (iffp->default_parse_flags[flag])
+				{
+					error_display(0, "The \"%s\" flag cannot be a default ship flag; ignoring it for IFF %s\n", Parse_object_flags[idx].name, iffp->iff_name);
+					iffp->default_parse_flags.remove(flag);
+				}
+			}
 
 			// this is cleared between each level but let's just set it here for thoroughness
 			iffp->ai_good_rearm_timestamp = TIMESTAMP::invalid();

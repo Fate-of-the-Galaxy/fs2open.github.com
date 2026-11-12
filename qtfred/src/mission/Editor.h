@@ -10,6 +10,8 @@
 #include <ship/ship.h>
 
 #include <QObject>
+#include <QString>
+#include <QTimer>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -66,6 +68,11 @@ class Editor : public QObject {
 	void createNewMission();
 
 	void maybeUseAutosave(std::string& filepath);
+
+	void startAutosaveTimer(int intervalSeconds);
+	void stopAutosaveTimer();
+	void setCurrentMissionPath(const QString& path);
+	const QString& autosaveDirectory() const { return _autosaveDirectory; }
 
 	/*! Load a mission. */
 	bool loadMission(const std::string& filepath, int flags = 0);
@@ -124,6 +131,12 @@ class Editor : public QObject {
 
   signals:
 	/**
+	 * @brief Emitted when the autosave timer fires; receiver performs the actual file save.
+	 * @param savePath Absolute path for the autosave file
+	 */
+	void autosaveDue(const QString& savePath);
+
+	/**
 	 * @brief Signal for when a new mission has been loaded
 	 * @param filepath The path of the mission file, empty if new mission
 	 */
@@ -163,32 +176,6 @@ class Editor : public QObject {
 	void layerListChanged();
 
   public:
-	// --- Undo / autosave state ---
-	int undoAvailable = 0;    ///< Whether an undo state (Backup.002) is available
-	int autosaveDisabled = 0; ///< When non-zero, autosave writes are suppressed
-
-	/**
-	 * @brief Rotate the backup stack and save the current mission state.
-	 *
-	 * Equivalent to CFREDDoc::autosave() in old FRED2.  Should be called after
-	 * any significant edit operation.  Does nothing when @c autosaveDisabled is set.
-	 *
-	 * @param desc Optional human-readable description of the operation being saved.
-	 * @return 0 on success, -1 if the backup write failed.
-	 */
-	int autosave(const char* desc = nullptr);
-
-	/**
-	 * @brief Restore the previous mission state from the backup stack.
-	 *
-	 * Equivalent to CFREDDoc::autoload() in old FRED2.
-	 * Caller is responsible for preserving and restoring the camera state and
-	 * @c saveName around this call.
-	 *
-	 * @return true on success, false if no undo state was available.
-	 */
-	bool autoload();
-
 	// object numbers for ships in a wing.
 	int wing_objects[MAX_WINGS][MAX_SHIPS_PER_WING];
 
@@ -200,11 +187,6 @@ class Editor : public QObject {
 	waypoint_list* cur_waypoint_list = nullptr;
 
 	subsys_to_render Render_subsys;
-
-	// Goober5000
-	// This must be done when either the wing name or the custom name is changed.
-	// (It's also duplicated in FS2, in post_process_mission, for setting the indexes at mission load.)
-	static void update_custom_wing_indexes();
 
 	void ai_update_goal_references(sexp_ref_type type, const char* old_name, const char* new_name);
 
@@ -239,14 +221,14 @@ class Editor : public QObject {
 	bool rename_wing(int wing, const SCP_string& new_name, bool rename_members = true);
 
 	// DA 1/7/99 These ship names are not variables
-	int rename_ship(int ship, const char* name);
+	int rename_ship(int ship, const char* name, bool update_display_name = true);
 
 	/**
 	 * @brief Delete a whole wing, leaving ships intact but wingless.
 	 *
 	 * @param[in] wing_num Index of the wing
 	 */
-	void remove_wing(int wing_num);
+	void disband_wing(int wing_num);
 
 	void delete_marked();
 
@@ -261,23 +243,33 @@ class Editor : public QObject {
 
 	static SCP_vector<SCP_string> get_docking_list(int model_index);
 
-	bool compareShieldSysData(const SCP_vector<GlobalShieldStatus>& teams, const SCP_vector<GlobalShieldStatus>& types) const;
-	void exportShieldSysData(SCP_vector<GlobalShieldStatus>& teams, SCP_vector<GlobalShieldStatus>& types) const;
-	void importShieldSysData(const SCP_vector<GlobalShieldStatus>& teams, const SCP_vector<GlobalShieldStatus>& types);
+	void exportShieldSysData(SCP_vector<GlobalShieldStatus>& teams, SCP_map<int, GlobalShieldStatus>& types) const;
+	void importShieldSysData(const SCP_vector<GlobalShieldStatus>& teams, const SCP_map<int, GlobalShieldStatus>& types);
 	void normalizeShieldSysData();
 
 	static void strip_quotation_marks(SCP_string& str);
 	static void pad_with_newline(SCP_string& str, size_t max_size);
 	static SCP_string get_display_name_for_text_box(const SCP_string &orig_name);
 
-	SCP_vector<int> getStartingWingLoadoutUseCounts();
+	// per-team ship and weapon usage (class index -> count used in starting wings)
+	struct LoadoutUseCounts {
+		SCP_map<int, int> ships;
+		SCP_map<int, int> weapons;
+	};
+
+	const SCP_vector<LoadoutUseCounts> &getStartingWingLoadoutUseCounts();
 
 	static const ai_goal_list* getAi_goal_list();
 	static int getAigoal_list_size();
 
-	void generate_team_weaponry_usage_list(int team, int* arr);
+  private slots:
+	void performTimedAutosave();
 
-  private:
+  private: // NOLINT(readability-redundant-access-specifiers)
+	QTimer*  _autosaveTimer        = nullptr;
+	QString  _autosaveDirectory;
+	QString  _currentMissionPath;
+
 	void clearMission(bool fast_reload = false);
 
 	void initialSetup();
@@ -287,21 +279,15 @@ class Editor : public QObject {
 	SCP_vector<std::unique_ptr<EditorViewport>> _viewports;
 	EditorViewport* _lastActiveViewport = nullptr;
 
-	int undoCount = 0; ///< Number of autosave operations performed since last reset
-
-	/** @brief Check whether Backup.002 exists and update @c undoAvailable accordingly. */
-	int checkUndo();
-
 	int numMarked = 0;
 
 	SCP_vector<GlobalShieldStatus> Shield_sys_teams;
-	SCP_vector<GlobalShieldStatus> Shield_sys_types;
+	SCP_map<int, GlobalShieldStatus> Shield_sys_types;	// ship class -> shield status; absent = HasShields
 
 	bool already_deleting_wing = false;
 
-	// ship and weapon usage pools
-	int _ship_usage[MAX_TVT_TEAMS][MAX_SHIP_CLASSES];
-	int _weapon_usage[MAX_TVT_TEAMS][MAX_WEAPON_TYPES];
+	// ship and weapon usage pools, one entry per team
+	SCP_vector<LoadoutUseCounts> _loadout_usage;
 
 	int common_object_delete(int obj);
 
@@ -314,7 +300,7 @@ class Editor : public QObject {
 
 	int invalidate_references(const char* name, sexp_ref_type type);
 
-	void delete_reinforcement(int num);
+	void delete_reinforcement(const char* name);
 
 	// changes the currently selected wing.  It is assumed that cur_wing == cur_ship's wing
 	// number.  Don't call this if this won't be true, or else you'll screw things up.
@@ -346,10 +332,6 @@ class Editor : public QObject {
 	 * @brief Finds a free wing slot (i.e. unused)
 	 */
 	static int find_free_wing();
-
-	void generate_wing_weaponry_usage_list(int* arr, int wing);
-
-	void generate_ship_usage_list(int* arr, int wing);
 
 	int get_visible_sub_system_count(ship* shipp);
 

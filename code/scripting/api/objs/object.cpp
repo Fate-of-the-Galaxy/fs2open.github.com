@@ -353,15 +353,6 @@ ADE_FUNC(getSignature, l_Object, NULL, "Gets the object's unique signature", "nu
 	return ade_set_args(L, "i", oh->sig);
 }
 
-ADE_FUNC(isValid, l_Object, NULL, "Detects whether handle is valid", "boolean", "true if handle is valid, false if handle is invalid, nil if a syntax/type error occurs")
-{
-	object_h *oh;
-	if(!ade_get_args(L, "o", l_Object.GetPtr(&oh)))
-		return ADE_RETURN_FALSE;
-
-	return ade_set_args(L, "b", oh->isValid());
-}
-
 ADE_FUNC(isExpiring, l_Object, nullptr, "Checks whether the object has the should-be-dead flag set, which will cause it to be deleted within one frame", "boolean", "true or false according to the flag, or nil if a syntax/type error occurs")
 {
 	object_h* oh;
@@ -650,7 +641,7 @@ ADE_FUNC(addPostMoveHook, l_Object, "function(object object) => void callback",
 }
 
 ADE_FUNC(assignSound, l_Object, "soundentry GameSnd, [vector Offset=nil, enumeration Flags=OS_NONE, subsystem Subsys=nil]",
-	"Assigns a sound to this object, with optional offset, sound flags (OS_XXXX), and associated subsystem.",
+	"Assigns a sound to this object, with optional offset, sound flags (OS_*), and associated subsystem.",
 	"number",
 	"Returns the index of the sound on this object, or -1 if a sound could not be assigned.")
 {

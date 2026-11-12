@@ -254,6 +254,8 @@ int ErrorChecker::checkObjectList() {
 						ptr->type = OBJ_SHIP;
 						Player_starts--;
 						t--;
+
+						ensure_valid_player_start_shipnum();
 					}
 					warning("Invalid ship type for a player.%s",
 							_viewport->Error_checker_apply_auto_corrections
@@ -431,7 +433,9 @@ int ErrorChecker::checkShips() {
 				error("Ship \"%s\" has a negative departure delay", Ships[i].ship_name);
 			}
 
-			if (Ships[i].arrival_location != ArrivalLocation::AT_LOCATION && Ships[i].arrival_distance <= 0) {
+			if (Ships[i].arrival_location != ArrivalLocation::AT_LOCATION &&
+				Ships[i].arrival_location != ArrivalLocation::FROM_DOCK_BAY &&
+				Ships[i].arrival_distance <= 0) {
 				error("Arrival distance for ship \"%s\" must be greater than 0", Ships[i].ship_name);
 			}
 
@@ -704,7 +708,9 @@ int ErrorChecker::checkWings() {
 				error("Wing \"%s\" has a negative departure delay", Wings[i].name);
 			}
 
-			if (Wings[i].arrival_location != ArrivalLocation::AT_LOCATION && Wings[i].arrival_distance <= 0) {
+			if (Wings[i].arrival_location != ArrivalLocation::AT_LOCATION &&
+				Wings[i].arrival_location != ArrivalLocation::FROM_DOCK_BAY &&
+				Wings[i].arrival_distance <= 0) {
 				error("Arrival distance for wing \"%s\" must be greater than 0", Wings[i].name);
 			}
 
@@ -784,19 +790,15 @@ int ErrorChecker::checkPlayerStarts() {
 
 int ErrorChecker::checkReinforcements() {
 
-	if (Num_reinforcements > MAX_REINFORCEMENTS) {
-		return internal_error("Number of reinforcements exceeds max limit");
-	}
-
-	for (int i = 0; i < Num_reinforcements; i++) {
-		if (Reinforcements[i].arrival_delay < 0) {
-			error("Reinforcement \"%s\" has a negative arrival delay", Reinforcements[i].name);
+	for (const auto& reinforcement : Reinforcements) {
+		if (reinforcement.arrival_delay < 0) {
+			error("Reinforcement \"%s\" has a negative arrival delay", reinforcement.name);
 		}
 
 		int z = 0;
 		int ship_wingnum = -1;
 		for (const auto& ship : Ships) {
-			if ((ship.objnum >= 0) && !stricmp(ship.ship_name, Reinforcements[i].name)) {
+			if ((ship.objnum >= 0) && !stricmp(ship.ship_name, reinforcement.name)) {
 				z = 1;
 				ship_wingnum = ship.wingnum;
 				break;
@@ -804,7 +806,7 @@ int ErrorChecker::checkReinforcements() {
 		}
 
 		for (const auto& wing : Wings) {
-			if (wing.wave_count && !stricmp(wing.name, Reinforcements[i].name)) {
+			if (wing.wave_count && !stricmp(wing.name, reinforcement.name)) {
 				z = 1;
 				break;
 			}
@@ -816,7 +818,7 @@ int ErrorChecker::checkReinforcements() {
 
 		if (ship_wingnum >= 0) {
 			potential("Reinforcement \"%s\" is a ship that belongs to a wing; the reinforcement flag will be ignored",
-					  Reinforcements[i].name);
+					  reinforcement.name);
 		}
 	}
 
@@ -835,6 +837,26 @@ int ErrorChecker::checkPlayerWings() {
 	if (strcmp(Starting_wing_names[0], TVT_wing_names[0]) != 0) {
 		error("The first starting wing (\"%s\") and the first team-versus-team wing (\"%s\") must have the same name",
 			  Starting_wing_names[0], TVT_wing_names[0]);
+	}
+
+	// The wing containing the player start must be present at mission start, so a custom arrival cue
+	// is only useful for controlling the arrival of subsequent waves.  Flag a single-wave wing with a
+	// custom cue as a potential issue, but never change the cue itself.
+	for (auto &w : Wings) {
+		if (!w.wave_count || w.num_waves > 1)
+			continue;
+		if (w.arrival_cue == Locked_sexp_true)
+			continue;
+
+		bool contains_player_start = false;
+		for (int j = 0; j < w.wave_count; j++)
+			if (Objects[Ships[w.ship_index[j]].objnum].type == OBJ_START)
+				contains_player_start = true;
+
+		if (contains_player_start) {
+			potential("Wing \"%s\" contains a player start and a custom arrival cue, but only one wave.  The arrival cue must evaluate to true at mission start, or the player will not be created.",
+					  w.name);
+		}
 	}
 
 	auto checkMixedSpecies = [this](int w) {
@@ -1204,35 +1226,31 @@ int ErrorChecker::checkTeamLoadout() {
 			continue;
 
 		// Build a fresh usage list for this team's starting wings.
-		int usage[MAX_WEAPON_TYPES];
-		_viewport->editor->generate_team_weaponry_usage_list(i, usage);
+		SCP_map<int, int> usage;
+		generate_weaponry_usage_list_team(i, usage);
 
-		// Zero out weapons that are accounted for in the loadout pool, so that
-		// only weapons missing from the pool remain non-zero.
-		for (int j = 0; j < Team_data[i].num_weapon_choices; j++) {
-			int wi = Team_data[i].weaponry_pool[j];
-			if (wi >= 0 && wi < MAX_WEAPON_TYPES)
-				usage[wi] = 0;
+		// Remove weapons that are accounted for in the loadout pool, so that
+		// only weapons missing from the pool remain.
+		for (const auto &entry : Team_data[i].weapon_choices) {
+			if (entry.class_index >= 0)
+				usage.erase(entry.class_index);
 		}
 
-		// Any non-zero entry is a weapon used in wings but absent from the loadout.
-		for (int j = 0; j < MAX_WEAPON_TYPES; j++) {
-			if (usage[j] <= 0)
+		// Any remaining entry is a weapon used in wings but absent from the loadout.
+		for (const auto &[weapon_class, count] : usage) {
+			if (count <= 0)
 				continue;
 
-			if (_viewport->Error_checker_apply_auto_corrections && Team_data[i].num_weapon_choices < MAX_WEAPON_TYPES) {
+			if (_viewport->Error_checker_apply_auto_corrections) {
 				// Add the missing weapon to the pool so the mission is structurally valid.
-				int slot = Team_data[i].num_weapon_choices;
-				Team_data[i].weaponry_pool[slot] = j;
-				Team_data[i].weaponry_count[slot] = usage[j];
-				strcpy_s(Team_data[i].weaponry_amount_variable[slot], "");
-				strcpy_s(Team_data[i].weaponry_pool_variable[slot], "");
-				Team_data[i].num_weapon_choices++;
+				auto &entry = Team_data[i].weapon_choices.emplace_back();
+				entry.class_index = weapon_class;
+				entry.count = count;
 				warning("Weapon \"%s\" is used in wings of team %d but was not in the team loadout pool — added automatically.",
-						Weapon_info[j].name, i + 1);
+						Weapon_info[weapon_class].name, i + 1);
 			} else {
 				warning("Weapon \"%s\" is used in wings of team %d but is not in the team loadout pool — can be auto-corrected by adding it.",
-						Weapon_info[j].name, i + 1);
+						Weapon_info[weapon_class].name, i + 1);
 			}
 		}
 	}

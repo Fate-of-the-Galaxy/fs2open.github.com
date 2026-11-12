@@ -26,6 +26,7 @@
 #include <math/fvi.h>
 #include <graphics/light.h>
 #include <mod_table/mod_table.h>
+#include <cfile/cfile.h>
 
 #include "mission/object.h"
 #include "prop/prop.h"
@@ -142,7 +143,9 @@ void draw_asteroid_field() {
 	}
 }
 
-void fredhtl_render_subsystem_bounding_box(fso::fred::subsys_to_render *s2r)
+enum class subsystem_highlight { BOUNDING_BOX, LABEL };
+
+void fredhtl_render_subsystem_highlight(fso::fred::subsys_to_render *s2r, subsystem_highlight highlight, float label_scale = 1.0f)
 {
 	vertex text_center;
 	SCP_string buf;
@@ -156,119 +159,75 @@ void fredhtl_render_subsystem_bounding_box(fso::fred::subsys_to_render *s2r)
 
 	auto bsp = &pm->submodel[subobj_num];
 
-	vec3d front_top_left = bsp->bounding_box[7];
-	vec3d front_top_right = bsp->bounding_box[6];
-	vec3d front_bot_left = bsp->bounding_box[4];
-	vec3d front_bot_right = bsp->bounding_box[5];
-	vec3d back_top_left = bsp->bounding_box[3];
-	vec3d back_top_right = bsp->bounding_box[2];
-	vec3d back_bot_left = bsp->bounding_box[0];
-	vec3d back_bot_right = bsp->bounding_box[1];
+	// transform bounding box corners from submodel-local space to world space
+	// and draw edges as thick camera-facing quads via g3_render_rod
+	color clr_red;
+	gr_init_color(&clr_red, 255, 32, 32);
+	float rod_width = 2.0f;
 
-	gr_set_color(255, 32, 32);
+	auto transform_and_draw_box = [&](const vec3d *bbox, int sobj_num) {
+		vec3d corners[8];
+		for (int i = 0; i < 8; i++)
+			model_instance_local_to_global_point(&corners[i], &bbox[i], pm, pmi, sobj_num, &objp->orient, &objp->pos);
 
-	enable_htl();
+		// 12 edges of a box: front face, back face, connecting edges
+		// bounding_box indices: 0=BBL 1=BBR 2=BTR 3=BTL 4=FBL 5=FBR 6=FTR 7=FTL
+		static const int edges[12][2] = {
+			{7, 6}, {6, 5}, {5, 4}, {4, 7},  // front face
+			{3, 2}, {2, 1}, {1, 0}, {0, 3},  // back face
+			{7, 3}, {6, 2}, {4, 0}, {5, 1},  // connecting edges
+		};
 
-	// get into the frame of reference of the submodel
-	int g3_count = 1;
-	g3_start_instance_matrix(&objp->pos, &objp->orient, true);
-	int mn = subobj_num;
-	while ((mn >= 0) && (pm->submodel[mn].parent >= 0))
-	{
-		g3_start_instance_matrix(&pm->submodel[mn].offset, &pmi->submodel[mn].canonical_orient, true);
-		g3_count++;
-		mn = pm->submodel[mn].parent;
-	}
-
-
-	//draw a cube around the subsystem
-	g3_draw_htl_line(&front_top_left, &front_top_right);
-	g3_draw_htl_line(&front_top_right, &front_bot_right);
-	g3_draw_htl_line(&front_bot_right, &front_bot_left);
-	g3_draw_htl_line(&front_bot_left, &front_top_left);
-
-	g3_draw_htl_line(&back_top_left, &back_top_right);
-	g3_draw_htl_line(&back_top_right, &back_bot_right);
-	g3_draw_htl_line(&back_bot_right, &back_bot_left);
-	g3_draw_htl_line(&back_bot_left, &back_top_left);
-
-	g3_draw_htl_line(&front_top_left, &back_top_left);
-	g3_draw_htl_line(&front_top_right, &back_top_right);
-	g3_draw_htl_line(&front_bot_left, &back_bot_left);
-	g3_draw_htl_line(&front_bot_right, &back_bot_right);
-
-
-	//draw another cube around a gun for a two-part turret
-	if ((ss->system_info->turret_gun_sobj >= 0) && (ss->system_info->turret_gun_sobj != ss->system_info->subobj_num))
-	{
-		bsp_info *bsp_turret = &pm->submodel[ss->system_info->turret_gun_sobj];
-
-		front_top_left = bsp_turret->bounding_box[7];
-		front_top_right = bsp_turret->bounding_box[6];
-		front_bot_left = bsp_turret->bounding_box[4];
-		front_bot_right = bsp_turret->bounding_box[5];
-		back_top_left = bsp_turret->bounding_box[3];
-		back_top_right = bsp_turret->bounding_box[2];
-		back_bot_left = bsp_turret->bounding_box[0];
-		back_bot_right = bsp_turret->bounding_box[1];
-
-		g3_start_instance_matrix(&bsp_turret->offset, &pmi->submodel[ss->system_info->turret_gun_sobj].canonical_orient, true);
-
-		g3_draw_htl_line(&front_top_left, &front_top_right);
-		g3_draw_htl_line(&front_top_right, &front_bot_right);
-		g3_draw_htl_line(&front_bot_right, &front_bot_left);
-		g3_draw_htl_line(&front_bot_left, &front_top_left);
-
-		g3_draw_htl_line(&back_top_left, &back_top_right);
-		g3_draw_htl_line(&back_top_right, &back_bot_right);
-		g3_draw_htl_line(&back_bot_right, &back_bot_left);
-		g3_draw_htl_line(&back_bot_left, &back_top_left);
-
-		g3_draw_htl_line(&front_top_left, &back_top_left);
-		g3_draw_htl_line(&front_top_right, &back_top_right);
-		g3_draw_htl_line(&front_bot_left, &back_bot_left);
-		g3_draw_htl_line(&front_bot_right, &back_bot_right);
-
-		g3_done_instance(true);
-	}
-
-	for (int i = 0; i < g3_count; i++)
-		g3_done_instance(true);
-
-	disable_htl();
-
-	// get text
-	buf = ss->system_info->subobj_name;
-
-	// add weapons if present
-	for (int i = 0; i < ss->weapons.num_primary_banks; ++i)
-	{
-		int wi = ss->weapons.primary_bank_weapons[i];
-		if (wi >= 0)
-		{
-			buf += "\n";
-			buf += Weapon_info[wi].name;
+		for (const auto& edge : edges) {
+			vec3d pts[2] = { corners[edge[0]], corners[edge[1]] };
+			g3_render_rod(&clr_red, 2, pts, rod_width);
 		}
-	}
-	for (int i = 0; i < ss->weapons.num_secondary_banks; ++i)
-	{
-		int wi = ss->weapons.secondary_bank_weapons[i];
-		if (wi >= 0)
-		{
-			buf += "\n";
-			buf += Weapon_info[wi].name;
-		}
-	}
+	};
 
-	//draw the text.  rotate the center of the subsystem into place before finding out where to put the text
-	vec3d center_pt;
-	vm_vec_unrotate(&center_pt, &bsp->offset, &objp->orient);
-	vm_vec_add2(&center_pt, &objp->pos);
-	g3_rotate_vertex(&text_center, &center_pt);
-	g3_project_vertex(&text_center);
-	if (!(text_center.flags & PF_OVERFLOW)) {
-		gr_set_color_fast(&colour_white);
-		gr_string((int)text_center.screen.xyw.x, (int)text_center.screen.xyw.y, buf.c_str());
+	if (highlight == subsystem_highlight::BOUNDING_BOX) {
+		enable_htl();
+
+		// draw a box around the subsystem
+		transform_and_draw_box(bsp->bounding_box, subobj_num);
+
+		// draw another box around a gun for a two-part turret
+		if ((ss->system_info->turret_gun_sobj >= 0) && (ss->system_info->turret_gun_sobj != ss->system_info->subobj_num))
+			transform_and_draw_box(pm->submodel[ss->system_info->turret_gun_sobj].bounding_box, ss->system_info->turret_gun_sobj);
+
+		disable_htl();
+	} else {
+		// get text
+		buf = ss->system_info->subobj_name;
+
+		// add weapons if present
+		for (int i = 0; i < ss->weapons.num_primary_banks; ++i)
+		{
+			int wi = ss->weapons.primary_bank_weapons[i];
+			if (wi >= 0)
+			{
+				buf += "\n";
+				buf += Weapon_info[wi].name;
+			}
+		}
+		for (int i = 0; i < ss->weapons.num_secondary_banks; ++i)
+		{
+			int wi = ss->weapons.secondary_bank_weapons[i];
+			if (wi >= 0)
+			{
+				buf += "\n";
+				buf += Weapon_info[wi].name;
+			}
+		}
+
+		//draw the text.  rotate the center of the subsystem into place before finding out where to put the text
+		vec3d center_pt;
+		vm_vec_unrotate(&center_pt, &bsp->offset, &objp->orient);
+		vm_vec_add2(&center_pt, &objp->pos);
+		g3_rotate_vertex(&text_center, &center_pt);
+		g3_project_vertex(&text_center);
+		if (!(text_center.flags & PF_OVERFLOW)) {
+			gr_string_outlined((int)text_center.screen.xyw.x, (int)text_center.screen.xyw.y, buf.c_str(), &colour_white, &colour_black, 2, GR_RESIZE_FULL, label_scale);
+		}
 	}
 }
 
@@ -305,12 +264,21 @@ FredRenderer::FredRenderer(os::Viewport* targetView) : _targetView(targetView) {
 	init_fred_colors();
 }
 FredRenderer::~FredRenderer() {
+	freeVolumetricModel();
 }
 void FredRenderer::setViewport(EditorViewport* viewport) {
 	Assertion(_viewport == nullptr, "Resetting viewport is not supported");
 	Assertion(viewport != nullptr, "Invalid viewport specified!");
 
 	_viewport = viewport;
+}
+
+void FredRenderer::freeVolumetricModel() {
+	if (_volumetric_model_num >= 0) {
+		model_unload(_volumetric_model_num);
+		_volumetric_model_num = -1;
+	}
+	_volumetric_cached_pof.clear();
 }
 
 void FredRenderer::render_grid(grid* gridp) {
@@ -383,7 +351,7 @@ void FredRenderer::display_distances() {
 						if (!(g3_project_vertex(&v) & PF_OVERFLOW)) {
 							sprintf(buf, "%.1f", vm_vec_dist(&objp->pos, &o2->pos));
 							gr_set_color_fast(&colour_white);
-							gr_string((int)v.screen.xyw.x, (int)v.screen.xyw.y, buf);
+							gr_string((int)v.screen.xyw.x, (int)v.screen.xyw.y, buf, GR_RESIZE_FULL, labelFontScale());
 						}
 				}
 
@@ -500,7 +468,7 @@ void FredRenderer::display_ship_info(int cur_object_index) {
 						gr_set_color_fast(&colour_white);
 					}
 
-					gr_string((int) v.screen.xyw.x, (int) v.screen.xyw.y, buf);
+					gr_string((int) v.screen.xyw.x, (int) v.screen.xyw.y, buf, GR_RESIZE_FULL, labelFontScale());
 				}
 			}
 		}
@@ -527,10 +495,18 @@ void FredRenderer::display_active_ship_subsystem(subsys_to_render& Render_subsys
 			if (view().Highlight_selectable_subsys) {
 				auto shipp = &Ships[objp->instance];
 
-				for (auto ss = GET_FIRST(&shipp->subsys_list); ss != END_OF_LIST(&shipp->subsys_list); ss = GET_NEXT(ss)) {
+				// first pass: draw all bounding boxes
+				for (auto ss : list_range(&shipp->subsys_list)) {
 					if (ss->system_info->subobj_num != -1) {
 						subsys_to_render s2r = { true, objp, ss };
-						fredhtl_render_subsystem_bounding_box(&s2r);
+						fredhtl_render_subsystem_highlight(&s2r, subsystem_highlight::BOUNDING_BOX);
+					}
+				}
+				// second pass: draw all labels
+				for (auto ss : list_range(&shipp->subsys_list)) {
+					if (ss->system_info->subobj_num != -1) {
+						subsys_to_render s2r = { true, objp, ss };
+						fredhtl_render_subsystem_highlight(&s2r, subsystem_highlight::LABEL, labelFontScale());
 					}
 				}
 			}
@@ -543,7 +519,8 @@ void FredRenderer::display_active_ship_subsystem(subsys_to_render& Render_subsys
 				}
 
 				if (Render_subsys.do_render) {
-					fredhtl_render_subsystem_bounding_box(&Render_subsys);
+					fredhtl_render_subsystem_highlight(&Render_subsys, subsystem_highlight::BOUNDING_BOX);
+					fredhtl_render_subsystem_highlight(&Render_subsys, subsystem_highlight::LABEL, labelFontScale());
 				} else {
 					cancel_display_active_ship_subsystem(Render_subsys);
 				}
@@ -727,13 +704,18 @@ void FredRenderer::render_one_model_htl(object* objp,
 		render_info.set_debug_flags(0);
 
 		if (Fred_outline) {
+			// use a different LOD for the wireframe to reduce visual clutter on high-poly models
+			int prop_model_num = Prop_info[propp->prop_info_index].model_num;
+			int outline_lod = std::min(view().Outline_lod, model_get(prop_model_num)->n_detail_levels - 1);
+			render_info.set_detail_level_lock(outline_lod);
 			render_info.set_color(Fred_outline >> 16, (Fred_outline >> 8) & 0xff, Fred_outline & 0xff);
 			render_info.set_flags(flags | MR_SHOW_OUTLINE_HTL | MR_NO_LIGHTING | MR_NO_POLYS | MR_NO_TEXTURING);
 			model_render_immediate(&render_info,
-								   Prop_info[propp->prop_info_index].model_num,
+								   prop_model_num,
 								   propp->model_instance_num,
 								   &objp->orient,
 								   &objp->pos);
+			render_info.set_detail_level_lock(-1);
 		}
 
 		render_info.set_flags(flags);
@@ -779,24 +761,33 @@ void FredRenderer::render_one_model_htl(object* objp,
 
 		g3_done_instance(false);
 
+		int ship_model_num = Ship_info[Ships[z].ship_info_index].model_num;
+		int ship_model_instance_num = Ships[z].model_instance_num;
+
 		// Outline pass: use a dedicated pass with MR_NO_POLYS so is_outlines_only_htl fires
 		// in the renderer. Modern HTL models don't have outline_buffer, so relying on
 		// MR_SHOW_OUTLINE_HTL alone (without MR_NO_POLYS) silently does nothing.
 		if (Fred_outline) {
 			model_render_params outline_info;
+			// use a different LOD for the wireframe to reduce visual clutter on high-poly models
+			int outline_lod = std::min(view().Outline_lod, model_get(ship_model_num)->n_detail_levels - 1);
+			outline_info.set_detail_level_lock(outline_lod);
+
 			outline_info.set_color(Fred_outline >> 16, (Fred_outline >> 8) & 0xff, Fred_outline & 0xff);
 			outline_info.set_flags(flags | MR_SHOW_OUTLINE_HTL | MR_NO_POLYS | MR_NO_LIGHTING | MR_NO_TEXTURING);
-			model_render_immediate(&outline_info, Ship_info[Ships[z].ship_info_index].model_num, Ships[z].model_instance_num, &objp->orient, &objp->pos);
+			model_render_immediate(&outline_info, ship_model_num, ship_model_instance_num, &objp->orient, &objp->pos);
+
+			outline_info.set_detail_level_lock(-1);
 		}
 
 		if (view().Show_ship_models) {
 			model_render_params render_info;
 			render_info.set_debug_flags(debug_flags);
-			render_info.set_replacement_textures(model_get_instance(Ships[z].model_instance_num)->texture_replace);
+			render_info.set_replacement_textures(model_get_instance(ship_model_instance_num)->texture_replace);
 			render_info.set_flags(flags);
 			if (Ship_info[Ships[z].ship_info_index].uses_team_colors)
 				render_info.set_team_color(Ships[z].team_name, Ships[z].secondary_team_name, Ships[z].team_change_timestamp, Ships[z].team_change_time);
-			model_render_immediate(&render_info, Ship_info[Ships[z].ship_info_index].model_num, Ships[z].model_instance_num, &objp->orient, &objp->pos);
+			model_render_immediate(&render_info, ship_model_num, ship_model_instance_num, &objp->orient, &objp->pos);
 		}
 
 		if (view().Draw_outline_at_warpin_position
@@ -886,6 +877,65 @@ void FredRenderer::render_one_model_htl(object* objp,
 	rendering_order.push_back(OBJ_INDEX(objp));
 }
 
+void FredRenderer::render_volumetric_overlay() {
+	if (!The_mission.volumetrics) {
+		return;
+	}
+
+	constexpr float alpha = 0.35f;
+
+	const volumetric_nebula& neb = *The_mission.volumetrics;
+	if (!neb.get_enabled() || neb.getHullPof().empty()) {
+		return;
+	}
+
+	const SCP_string& pof = neb.getHullPof();
+	if (pof != _volumetric_cached_pof) {
+		// Stamp the cache before model_load so a re-entrant paint (e.g. from
+		// an Error() dialog pumping events on a missing POF) sees the load
+		// as already attempted and bails out instead of re-loading.
+		freeVolumetricModel();
+		_volumetric_cached_pof = pof;
+		if (cf_exists_full(pof.c_str(), CF_TYPE_MODELS)) {
+			_volumetric_model_num = model_load(pof.c_str());
+		} else {
+			mprintf(("Volumetric nebula hull POF '%s' not found; skipping editor overlay.\n", pof.c_str()));
+			if (_viewport->dialogProvider != nullptr) {
+				SCP_string msg = "Volumetric nebula hull POF '";
+				msg += pof;
+				msg += "' was not found. The nebula will render without an editor overlay until a valid POF is set in the Volumetric Nebula dialog.";
+				_viewport->dialogProvider->showButtonDialog(DialogType::Warning,
+															"Volumetric Nebula POF Missing",
+															msg,
+															{ DialogButton::Ok });
+			}
+		}
+	}
+
+	if (_volumetric_model_num < 0) {
+		return;
+	}
+
+	const auto& col = neb.getNebulaColor();
+	// Premultiply by alpha. MR_NO_TEXTURING + MR_ALL_XPARENT lands on
+	// ALPHA_BLEND_ADDITIVE (glBlendFunc(GL_ONE, GL_ONE)) which ignores
+	// src.alpha, so scaling RGB here is what actually controls intensity.
+	const int r = static_cast<int>(std::get<0>(col) * alpha * 255.0f);
+	const int g = static_cast<int>(std::get<1>(col) * alpha * 255.0f);
+	const int b = static_cast<int>(std::get<2>(col) * alpha * 255.0f);
+	const vec3d pos = neb.getPos();
+
+	enable_htl();
+
+	model_render_params fill;
+	fill.set_color(r, g, b);
+	fill.set_alpha(1.0f);
+	fill.set_flags(MR_NO_LIGHTING | MR_NO_TEXTURING | MR_NO_BATCH | MR_ALL_XPARENT);
+	model_render_immediate(&fill, _volumetric_model_num, &vmd_identity_matrix, &pos);
+
+	disable_htl();
+}
+
 void FredRenderer::render_models(int cur_object_index) {
 	gr_set_color_fast(&colour_white);
 
@@ -911,15 +961,19 @@ void FredRenderer::render_models(int cur_object_index) {
 }
 
 void FredRenderer::render_frame(int cur_object_index,
-								subsys_to_render& Render_subsys,
-								bool box_marking,
-								const Marking_box& marking_box) {
+	subsys_to_render& Render_subsys,
+	bool box_marking,
+	const Marking_box& marking_box,
+	qreal scale)
+{
 
 	// Make sure our OpenGL context is used for rendering
 	gr_use_viewport(_targetView);
-
+	_devicePixelRatio = static_cast<float>(scale);
+	uint32_t width = _targetView->getSize().first * scale;
+	uint32_t height = _targetView->getSize().second * scale;
 	// Resize the rendering window in case the previous size was different
-	gr_screen_resize(_targetView->getSize().first, _targetView->getSize().second);
+	gr_screen_resize(width, height);
 
 	char buf[256];
 	int x, y, w, h, inst;
@@ -964,6 +1018,7 @@ void FredRenderer::render_frame(int cur_object_index,
 
 	gr_set_color(0, 0, 64);
 	render_models(cur_object_index);
+	render_volumetric_overlay();
 
 	if (view().Show_distances) {
 		display_distances();
@@ -1016,6 +1071,9 @@ void FredRenderer::render_frame(int cur_object_index,
 		if (!(v.codes & CC_BEHIND)) {
 			if (!(g3_project_vertex(&v) & PF_OVERFLOW)) {
 				gr_get_string_size(&w, &h, buf);
+				// scale the box to match the scaled label text
+				w = fl2i(w * labelFontScale());
+				h = fl2i(h * labelFontScale());
 
 				x = (int) v.screen.xyw.x;
 				y = (int) v.screen.xyw.y + 20;
@@ -1027,7 +1085,7 @@ void FredRenderer::render_frame(int cur_object_index,
 				gr_rect(x - 5, y - 5, w + 5, h + 5);
 
 				gr_set_color_fast(&colour_white);
-				gr_string(x, y, buf);
+				gr_string(x, y, buf, GR_RESIZE_FULL, labelFontScale());
 			}
 		}
 	}
@@ -1047,8 +1105,9 @@ void FredRenderer::render_frame(int cur_object_index,
 
 	sprintf(buf, "(%.1f,%.1f,%.1f)", _viewport->camera.eye_pos.xyz.x, _viewport->camera.eye_pos.xyz.y, _viewport->camera.eye_pos.xyz.z);
 	gr_get_string_size(&w, &h, buf);
+	w = fl2i(w * labelFontScale());
 	gr_set_color_fast(&colour_white);
-	gr_string(gr_screen.max_w - w - 2, 2, buf);
+	gr_string(gr_screen.max_w - w - 2, 2, buf, GR_RESIZE_FULL, labelFontScale());
 
 	const auto hiddenLayerCount = _viewport->getHiddenLayerCount();
 	if (hiddenLayerCount > 0) {
@@ -1056,7 +1115,7 @@ void FredRenderer::render_frame(int cur_object_index,
 		sprintf(buf, "%d %s Hidden",
 				hiddenLayerCount,
 				hiddenLayerCount == 1 ? "Layer" : "Layers");
-		gr_string(8, 8, buf);
+		gr_string(8, 8, buf, GR_RESIZE_FULL, labelFontScale());
 	}
 
 	g3_end_frame(); // ** Accounted for
@@ -1080,6 +1139,10 @@ void FredRenderer::resize(int width, int height) {
 }
 ViewSettings& FredRenderer::view() {
 	return _viewport->view;
+}
+
+float FredRenderer::labelFontScale() {
+	return view().Label_font_scale * _devicePixelRatio;
 }
 
 } // namespace fso::fred

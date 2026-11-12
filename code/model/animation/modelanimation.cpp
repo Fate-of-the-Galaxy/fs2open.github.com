@@ -224,7 +224,8 @@ namespace animation {
 			if (m_flags[Animation_Flags::Random_starting_phase]) {
 				instanceData.time = util::Random::next() * util::Random::INV_F_MAX_VALUE * instanceData.duration;
 				//Check if we might be on the way backwards
-				if (m_flags[Animation_Flags::Loop, Animation_Flags::Auto_Reverse] && !m_flags[Animation_Flags::Reset_at_completion] && util::Random::flip_coin()) {
+				if (m_flags.any_of(Animation_Flags::Loop,Animation_Flags::Auto_Reverse) &&
+					!m_flags[Animation_Flags::Reset_at_completion] && util::Random::flip_coin()) {
 					prevTime = instanceData.duration;
 					instanceData.canonicalDirection = ModelAnimationDirection::RWD;
 				}
@@ -1062,10 +1063,29 @@ namespace animation {
 		return true;
 	}
 
+	bool ModelAnimationSet::advanceMoveableToFinal(polymodel_instance* pmi, const SCP_string& name) const {
+		SCP_string lowername = name;
+		SCP_tolower(lowername);
+		auto moveable = m_moveableSet.find(lowername);
+		if (moveable == m_moveableSet.end())
+			return false;
+
+		moveable->second->advanceToFinalState(pmi);
+		return true;
+	}
+
 	void ModelAnimationSet::initializeMoveables(polymodel_instance* pmi) {
 		for(const auto& moveable : m_moveableSet){
 			moveable.second->initialize(this, pmi);
 		}
+	}
+
+	void ModelAnimationMoveable::advanceToFinalState(polymodel_instance* pmi) {
+		auto it = m_instances.find(pmi->id);
+		if (it == m_instances.end() || !it->second.animation)
+			return;
+
+		it->second.animation->start(pmi, ModelAnimationDirection::FWD, true, true);
 	}
 
 	SCP_vector<SCP_string> ModelAnimationSet::getRegisteredMoveables() const {
@@ -1359,7 +1379,7 @@ namespace animation {
 		if (Animation_types.find(type)->second.second) {
 			//This is a type where the code does not reset the animation. The animation is expected to auto-reset in one way or another.
 			//If it doesn't, nothing will crash, but the result is most likely unintended.
-			if (!animation->m_flags[Animation_Flags::Auto_Reverse, Animation_Flags::Reset_at_completion]) {
+			if (animation->m_flags.none_of(Animation_Flags::Auto_Reverse,Animation_Flags::Reset_at_completion)) {
 				error_display(0, "Animation trigger type %s expects an auto-reset flag to be set.", atype);
 			}
 
@@ -1490,7 +1510,7 @@ namespace animation {
 						curve = Curves[curve_id];
 				}
 
-				driver = [remap_driver_source = std::move(remap_driver_source), curve](ModelAnimation &, ModelAnimation::instance_data &instance, polymodel_instance *pmi, float) {
+				driver = [remap_driver_source = std::move(remap_driver_source), curve = std::move(curve)](ModelAnimation &, ModelAnimation::instance_data &instance, polymodel_instance *pmi, float) {
 					float oldFrametime = instance.time;
 					instance.time = curve ? curve->GetValue(remap_driver_source(pmi)) : remap_driver_source(pmi);
 					CLAMP(instance.time, 0.0f, instance.duration);
@@ -1515,7 +1535,7 @@ namespace animation {
 						curve = Curves[curve_id];
 				}
 
-				propertyDrivers.emplace_back([driver_source = std::move(driver_source), curve, target](ModelAnimation &, ModelAnimation::instance_data &instance, polymodel_instance *pmi) {
+				propertyDrivers.emplace_back([driver_source = std::move(driver_source), curve = std::move(curve), target](ModelAnimation &, ModelAnimation::instance_data &instance, polymodel_instance *pmi) {
 					float& property = instance.*(target.target);
 					property = curve ? curve->GetValue(driver_source(pmi)) : driver_source(pmi);
 					if(target.clamp) {
@@ -1541,7 +1561,7 @@ namespace animation {
 						curve = Curves[curve_id];
 				}
 
-				startupDrivers.emplace_back([driver_source = std::move(driver_source), curve, target](ModelAnimation &, ModelAnimation::instance_data &instance, polymodel_instance *pmi) {
+				startupDrivers.emplace_back([driver_source = std::move(driver_source), curve = std::move(curve), target](ModelAnimation &, ModelAnimation::instance_data &instance, polymodel_instance *pmi) {
 					float& property = instance.*(target.target);
 					property = curve ? curve->GetValue(driver_source(pmi)) : driver_source(pmi);
 					if(target.clamp) {

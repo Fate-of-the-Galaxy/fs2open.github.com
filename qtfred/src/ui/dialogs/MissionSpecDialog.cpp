@@ -8,6 +8,7 @@
 #include <ui/dialogs/MissionSpecs/CustomStringsDialog.h>
 #include <ui/dialogs/MissionSpecs/CustomWingNamesDialog.h>
 #include <ui/dialogs/MissionSpecs/SoundEnvironmentDialog.h>
+#include <ui/dialogs/MissionSpecs/SupportRearmDialog.h>
 #include <ui/util/default_dir.h>
 #include <ui/util/SignalBlockers.h>
 #include "mission/util.h"
@@ -43,7 +44,6 @@ void MissionSpecDialog::accept()
 {
 	// If apply() returns true, close the dialog
 	if (_model->apply()) {
-		_viewport->editor->autosave("mission specs editor");
 		QDialog::accept();
 	}
 	// else: validation failed, don't close
@@ -62,7 +62,15 @@ void MissionSpecDialog::reject()
 
 void MissionSpecDialog::closeEvent(QCloseEvent* e) {
 	reject();
-	e->ignore(); // Don't let the base class close the window
+	// reject() hides the dialog when it actually closes. Let that close
+	// proceed (so a dialog created with WA_DeleteOnClose is destroyed),
+	// and only veto it when reject() decided to keep the dialog open (e.g.
+	// the user cancelled the unsaved-changes prompt).
+	if (isVisible()) {
+		e->ignore();
+	} else {
+		e->accept();
+	}
 }
 
 void MissionSpecDialog::initializeUi()
@@ -96,11 +104,6 @@ void MissionSpecDialog::updateUi() {
 
 	ui->lowResScreen->setText(_model->getLowResLoadingScren().c_str());
 	ui->highResScreen->setText(_model->getHighResLoadingScren().c_str());
-
-	ui->toggleSupportShip->setChecked(_model->getDisallowSupport());
-	ui->toggleHullRepair->setChecked(_model->getMissionFlag(Mission::Mission_Flags::Support_repairs_hull));
-	ui->hullRepairMax->setValue(_model->getHullRepairMax());
-	ui->subsysRepairMax->setValue(_model->getSubsysRepairMax());
 
 	ui->toggleTrail->setChecked(_model->getMissionFlag(Mission::Mission_Flags::Toggle_ship_trails));
 	ui->toggleSpeedDisplay->setChecked(_model->getTrailThresholdFlag());
@@ -389,20 +392,13 @@ void MissionSpecDialog::on_highResScreenButton_clicked() {
 	}
 }
 
-void MissionSpecDialog::on_toggleSupportShip_toggled(bool enabled) {
-	_model->setDisallowSupport(enabled);
-}
-
-void MissionSpecDialog::on_toggleHullRepair_toggled(bool enabled) {
-	_model->setMissionFlagDirect(Mission::Mission_Flags::Support_repairs_hull, enabled);
-}
-
-void MissionSpecDialog::on_hullRepairMax_valueChanged(double value) {
-	_model->setHullRepairMax((float)value);
-}
-
-void MissionSpecDialog::on_subsysRepairMax_valueChanged(double value) {
-	_model->setSubsysRepairMax((float)value);
+void MissionSpecDialog::on_supportRearmOptionsButton_clicked()
+{
+	SupportRearmDialog dlg(this, _viewport);
+	dlg.setInitial(_model->getSupportRearmSettings());
+	if (dlg.exec() == QDialog::Accepted) {
+		_model->setSupportRearmSettings(dlg.settings());
+	}
 }
 
 void MissionSpecDialog::on_toggleTrail_toggled(bool enabled) {

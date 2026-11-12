@@ -7,6 +7,8 @@
 #include "options/Option.h"
 #include "popup/popup.h"
 
+#include "cmdline/cmdline.h"
+
 #include "freespace.h"
 
 
@@ -138,10 +140,7 @@ void OptConfigurator::offer_save_options_popup()
 
 // The main Imgui rendering happens here as well as any i/o checking
 void OptConfigurator::onFrame() {
-	if (gr_screen.mode == GR_OPENGL)
-		ImGui_ImplOpenGL3_NewFrame();
-	ImGui_ImplSDL2_NewFrame(gr_screen.max_w, gr_screen.max_h);
-	ImGui::NewFrame();
+	gr_imgui_begin_frame();
 
 	gr_reset_clip();
 	gr_clear();
@@ -177,13 +176,11 @@ void OptConfigurator::onFrame() {
 	
 	if (Cmdline_show_imgui_debug)
 		ImGui::ShowDemoWindow();
-	ImGui::Render();
-	if (gr_screen.mode == GR_OPENGL)
-		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
 	if (CloseThis) {
 		close();
 	}
 
+	// gr_flip() renders and submits the ImGui frame opened above.
 	gr_flip();
 }

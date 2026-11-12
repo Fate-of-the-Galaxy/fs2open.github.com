@@ -1,12 +1,15 @@
 
 #include "tracing/tracing.h"
 #include "graphics/2d.h"
+#include "globalincs/systemvars.h"
 #include "parse/parselo.h"
 #include "io/timer.h"
+#include "cmdline/cmdline.h"
 
 #include "TraceEventWriter.h"
 #include "MainFrameTimer.h"
 #include "FrameProfiler.h"
+#include "options/Option.h"
 
 #include <cinttypes>
 #include <fstream>
@@ -18,18 +21,18 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-static int64_t get_tid() {
+static int64_t query_tid() {
     return (int64_t) GetCurrentThreadId();
 }
 #elif __LINUX__
 #include <sys/syscall.h>
-static int64_t get_tid() {
+static int64_t query_tid() {
 	return (int64_t) syscall(SYS_gettid);
 }
 #else
 #include <pthread.h>
 
-static int64_t get_tid() {
+static int64_t query_tid() {
 // This is not a reliable way of getting the tid but it's better than nothing
     return (int64_t) pthread_self();
 }
@@ -37,16 +40,29 @@ static int64_t get_tid() {
 
 // A function for getting the id of the current process
 #ifdef WIN32
-static int64_t get_pid() {
+static int64_t query_pid() {
     return (int64_t)GetCurrentProcessId();
 }
 #else
 #include <unistd.h>
 
-static int64_t get_pid() {
+static int64_t query_pid() {
 	return (int64_t) getpid();
 }
 #endif
+
+// Cached accessors: the thread/process id never changes for the lifetime of a thread, but the
+// underlying queries are real syscalls on Linux (SYS_gettid) and glibc (getpid, uncached since
+// 2.25). A trace event is emitted for every TRACE_SCOPE, so querying these per event dominated the
+// tracing overhead -- cache them in thread-local storage so each thread pays the syscall only once.
+static int64_t get_tid() {
+	thread_local const int64_t tid = query_tid();
+	return tid;
+}
+static int64_t get_pid() {
+	thread_local const int64_t pid = query_pid();
+	return pid;
+}
 
 namespace {
 
@@ -55,11 +71,20 @@ using namespace tracing;
 std::unique_ptr<ThreadedTraceEventWriter> traceEventWriter;
 std::unique_ptr<ThreadedMainFrameTimer> mainFrameTimer;
 std::unique_ptr<FrameProfiler> frameProfiler;
+// Guards frameProfiler's lifetime. submit_event() reads it from whichever thread emits a trace
+// event -- not just the main thread; e.g. the cutscene decode/audio threads (TRACE_SCOPE in
+// cutscene/player.cpp) -- while set_frame_profiling_enabled() constructs/destroys it from the main
+// thread whenever the "Frame Profiler Overlay" option is toggled at runtime. Without this, a toggle
+// mid-cutscene can free the object out from under a concurrent processEvent() call.
+std::mutex frameProfilerMutex;
 
 SCP_vector<int> query_objects;
-// The GPU timestamp queries use an internal free list to reduce the number of graphics API calls
+// Free list for backends where queries are immediately reusable (OpenGL).
+// When queries are NOT reusable (Vulkan), the free list is bypassed and
+// handles are returned to the backend.
 SCP_queue<int> free_query_objects;
 bool do_gpu_queries = true;
+bool queries_reusable = true;
 
 int get_query_object() {
 	if (!free_query_objects.empty()) {
@@ -69,7 +94,12 @@ int get_query_object() {
 	}
 
 	auto id = gr_create_query_object();
-	query_objects.push_back(id);
+	if (queries_reusable) {
+		// Track for bulk cleanup at shutdown. When not reusable, the backend
+		// owns the lifecycle — handles are returned via gr_delete_query_object
+		// and the backend's own shutdown destroys the pool.
+		query_objects.push_back(id);
+	}
 	return id;
 }
 
@@ -83,7 +113,12 @@ int get_gpu_timestamp_query() {
 }
 
 void free_query_object(int obj) {
-	free_query_objects.push(obj);
+	if (queries_reusable) {
+		free_query_objects.push(obj);
+	} else {
+		// Backend manages reset lifecycle internally — hand it back.
+		gr_delete_query_object(obj);
+	}
 }
 
 struct gpu_trace_event {
@@ -124,8 +159,11 @@ void submit_event(trace_event* evt) {
 		mainFrameTimer->processEvent(evt);
 	}
 
-	if (frameProfiler) {
-		frameProfiler->processEvent(evt);
+	{
+		std::lock_guard<std::mutex> lock(frameProfilerMutex);
+		if (frameProfiler) {
+			frameProfiler->processEvent(evt);
+		}
 	}
 }
 
@@ -187,7 +225,7 @@ void process_gpu_events() {
 				}
 				break;
 			default:
-				UNREACHABLE("Invalid event type!");
+				UNREACHABLE("Invalid event type %d!", static_cast<int>(first.base_evt.type));
 				gpu_events.pop();
 				break;
 		}
@@ -201,6 +239,7 @@ void process_gpu_events() {
 
 void init_event(const Category& category, trace_event* evt) {
 	evt->category = &category;
+	evt->category_id = category.getId();
 
 	evt->timestamp = timer_get_nanoseconds();
 
@@ -225,12 +264,15 @@ void init() {
 		mainFrameTimer.reset(new ThreadedMainFrameTimer());
 		do_async_events = true;
 	}
-	if (Cmdline_frame_profile) {
-		frameProfiler.reset(new FrameProfiler());
-		do_trace_events = true;
-	}
+	// -profile_frame_time turns the profiler on for the whole session (kept for backward
+	// compatibility). OR in the current state rather than overwriting it: the
+	// "Game.ProfilerOverlay" option's loadInitialValues() call (see OptionsManager) runs before
+	// tracing::init(), so a persisted "on" setting may already have enabled the profiler by the
+	// time we get here, and -profile_frame_time knows nothing about it.
+	set_frame_profiling_enabled(Cmdline_frame_profile || frame_profiling_active());
 
 	do_gpu_queries = gr_is_capable(gr_capability::CAPABILITY_TIMESTAMP_QUERY);
+	queries_reusable = gr_is_capable(gr_capability::CAPABILITY_QUERIES_REUSABLE);
 
 	if (do_gpu_queries) {
 		gpu_start_query = get_gpu_timestamp_query();
@@ -249,29 +291,99 @@ void process_events() {
 	}
 }
 void frame_profile_process_frame() {
-	Assertion(frameProfiler, "Frame profiling must be enabled for this function!");
+	std::lock_guard<std::mutex> lock(frameProfilerMutex);
+	if (!frameProfiler) {
+		return;
+	}
 
-	return frameProfiler->processFrame();
+	frameProfiler->processFrame();
 }
 
 SCP_string get_frame_profile_output() {
+	std::lock_guard<std::mutex> lock(frameProfilerMutex);
 	Assertion(frameProfiler, "Frame profiling must be enabled for this function!");
 
 	return frameProfiler->getContent();
 }
 
-void shutdown() {
-	while (!gpu_events.empty()) {
-		process_events();
+const frame_overlay_snapshot& get_frame_profiler_overlay_snapshot() {
+	std::lock_guard<std::mutex> lock(frameProfilerMutex);
+	Assertion(frameProfiler, "Frame profiling must be enabled for this function!");
 
-		// Don't do busy waiting...
-		os_sleep(5);
+	return frameProfiler->getOverlaySnapshot();
+}
+
+bool frame_profiling_active() {
+	std::lock_guard<std::mutex> lock(frameProfilerMutex);
+	return frameProfiler != nullptr;
+}
+
+void set_frame_profiling_enabled(bool enable) {
+	std::lock_guard<std::mutex> lock(frameProfilerMutex);
+
+	// The profiler's existence is the single source of truth for "is the frame profiler
+	// collecting". submit_event() feeds it whenever it exists, and frame_profile_process_frame()
+	// (the only thing that drains its event buffer) is driven from gr_flip(), so collection and
+	// draining are gated on the same condition and cannot drift apart. Destroying it on disable
+	// is what stops collection -- leaving a live profiler behind while nothing drained it is how
+	// its buffer used to grow without bound.
+	if (enable != (frameProfiler != nullptr)) {
+		if (enable) {
+			// Only the main thread calls this function: init() and the option's change listener. The change
+			// listener can run before init() sets main_thread_id, so use the id of the calling thread then.
+			frameProfiler.reset(new FrameProfiler(main_thread_id != -1 ? main_thread_id : get_tid()));
+		} else {
+			frameProfiler = nullptr;
+		}
+	}
+
+	// Recomputed unconditionally, not just on a transition: init() clears do_trace_events before
+	// calling us, and the option's change listener may already have enabled the profiler by then.
+	do_trace_events = Cmdline_json_profiling || enable;
+}
+
+// coverity[GLOBAL_INIT_ORDER] -- safe; OptionBuilder::finish() uses Meyers singleton
+static auto ProfilerOverlayOption = options::OptionBuilder<bool>("Game.ProfilerOverlay",
+	std::pair<const char*, int>{"Frame Profiler Overlay", 1940},
+	std::pair<const char*, int>{"Show an ImGui overlay with a frametime graph and a breakdown of what's taking up frame time", 1941})
+	.category(std::make_pair("Graphics", 1825))
+	.level(options::ExpertLevel::Advanced)
+	.default_val(false)
+	.change_listener([](const bool& val, bool) {
+		set_frame_profiling_enabled(val);
+		return true;
+	})
+	.importance(69)
+	.finish();
+
+void shutdown() {
+	if (queries_reusable) {
+		while (!gpu_events.empty()) {
+			process_events();
+
+			// Don't do busy waiting...
+			os_sleep(5);
+		}
+	} else {
+		// Discard remaining GPU events — no more frames will
+		// be submitted, so unsubmitted queries can never become
+		// available.
+		while (!gpu_events.empty()) {
+			auto& first = gpu_events.front();
+			gr_delete_query_object(first.gpu_begin_query);
+			gr_delete_query_object(first.gpu_end_query);
+			gpu_events.pop();
+		}
 	}
 
 	for (auto query : query_objects) {
 		gr_delete_query_object(query);
 	}
 	query_objects.clear();
+
+	while (!free_query_objects.empty()) {
+		free_query_objects.pop();
+	}
 
 	mainFrameTimer = nullptr;
 	traceEventWriter = nullptr;
@@ -302,6 +414,7 @@ void start(const Category& category, trace_event* evt) {
 
 		gpu_trace_event gpu_event;
 		gpu_event.base_evt.category = &category;
+		gpu_event.base_evt.category_id = category.getId();
 		gpu_event.base_evt.tid = 1;
 		gpu_event.base_evt.pid = GPU_PID;
 		gpu_event.base_evt.type = EventType::Begin;
@@ -310,16 +423,31 @@ void start(const Category& category, trace_event* evt) {
 
 		// This does not need to be synchronized since GPU queries are only allowed on the main thread.
 		gpu_events.push(gpu_event);
+		evt->gpu_started = true;
 	}
 }
 
 void end(trace_event* evt) {
-	if (!do_trace_events) {
-		// No one to process the event is here
+	// A scope can be open when the profiler turns on, so start() may never have run for it.
+	if (evt->type != EventType::Complete) {
 		return;
 	}
 
-	if (!initialized) {
+	// The profiler can also turn off mid-scope. Close the GPU event that start() opened.
+	const bool close_gpu = evt->gpu_started && initialized && do_gpu_queries;
+	evt->gpu_started = false;
+
+	if (!do_trace_events || !initialized) {
+		if (close_gpu) {
+			gpu_trace_event gpu_event;
+			gpu_event.base_evt.category = evt->category;
+			gpu_event.base_evt.category_id = evt->category_id;
+			gpu_event.base_evt.tid = 1;
+			gpu_event.base_evt.pid = GPU_PID;
+			gpu_event.base_evt.type = EventType::End;
+			gpu_event.gpu_begin_query = get_gpu_timestamp_query();
+			gpu_events.push(gpu_event);
+		}
 		return;
 	}
 
@@ -333,11 +461,12 @@ void end(trace_event* evt) {
 	submit_event(evt);
 
 	// Create GPU events
-	if (do_gpu_queries && evt->category->usesGPUCounter()) {
+	if (close_gpu) {
 		Assertion(get_tid() == main_thread_id, "This function must be called from the main thread!");
 
 		gpu_trace_event gpu_event;
 		gpu_event.base_evt.category = evt->category;
+		gpu_event.base_evt.category_id = evt->category_id;
 		gpu_event.base_evt.tid = 1;
 		gpu_event.base_evt.pid = GPU_PID;
 		gpu_event.base_evt.type = EventType::End;

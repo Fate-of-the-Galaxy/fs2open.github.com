@@ -5,6 +5,7 @@
 #include "FredRenderer.h"
 #include "Editor.h"
 #include "IDialogProvider.h"
+#include "ui/ThemeMode.h"
 
 #include <object/object.h>
 
@@ -26,6 +27,12 @@ enum class CreateKind {
 enum class OtherKind {
 	Waypoint,
 	JumpNode,
+};
+
+enum class DataMenuStyle {
+	Auto = 0,
+	Columns = 1,
+	Searchable = 2,
 };
 
 struct ViewSettings {
@@ -54,6 +61,8 @@ struct ViewSettings {
 	bool Show_jump_nodes = true;
 	bool Show_compass = true;
 	bool Highlight_selectable_subsys = false;
+	int Outline_lod = 1;
+	float Label_font_scale = 1.0f;  // multiplier applied to viewport text labels
 
 	ViewSettings();
 };
@@ -97,7 +106,11 @@ class EditorViewport {
 	static const char* DefaultLayerName;
 
 	enum {
-		DUP_DRAG_OF_WING = 2
+		DUP_DRAG_OF_WING = 2,
+		// Ctrl+Shift+drag.  Same as a normal Ctrl+drag duplicate, except marked
+		// waypoints insert a copy into their source path rather than starting a
+		// new path.  Non-waypoint object types behave like a plain duplicate.
+		DUP_DRAG_INSERT = 3,
 	};
 
 	EditorViewport(Editor* in_editor, std::unique_ptr<FredRenderer>&& in_renderer);
@@ -112,6 +125,10 @@ class EditorViewport {
 
 	void game_do_frame(const int cur_object_index);
 
+	vec3d orbitCameraGetPivot();
+
+	vec3d selectionMidpoint(int cur_object_index) const;
+
 	int object_check_collision(object* objp, vec3d* p0, vec3d* p1, vec3d* hitpos);
 
 	int select_object(int cx, int cy);
@@ -119,6 +136,7 @@ class EditorViewport {
 	SCP_vector<SCP_string> getLayerNames() const;
 	bool addLayer(const SCP_string& name, SCP_string* errorMessage = nullptr);
 	bool deleteLayer(const SCP_string& name, SCP_string* errorMessage = nullptr);
+	bool renameLayer(const SCP_string& oldName, const SCP_string& newName, SCP_string* errorMessage = nullptr);
 	bool setLayerVisibility(const SCP_string& name, bool visible, SCP_string* errorMessage = nullptr);
 	bool getLayerVisibility(const SCP_string& name, bool* visible, SCP_string* errorMessage = nullptr) const;
 	void showAllLayers();
@@ -128,6 +146,12 @@ class EditorViewport {
 	SCP_string getObjectLayerName(int objectIndex) const;
 	bool moveObjectToLayer(int objectIndex, const SCP_string& layerName, SCP_string* errorMessage = nullptr);
 	void moveMarkedObjectsToLayer(const SCP_string& layerName, SCP_string* errorMessage = nullptr);
+
+	// Sync the _objectLayers map for a freshly-created object by reading its
+	// per-object fred_layer string (or the parent waypoint list's, for waypoints).
+	// Call this after creating a new ship/prop/jump-node/waypoint outside of
+	// the normal mission-load path (e.g. when duplicating objects).
+	void registerObjectInLayer(int objectIndex);
 
 	bool isObjectVisibleInLayer(const object* objp) const;
 
@@ -150,7 +174,11 @@ class EditorViewport {
 	int createWaypointAtScreenPos(int x, int y, int waypoint_instance = -1);
 	int createJumpNodeAtScreenPos(int x, int y);
 
-	int duplicate_marked_objects();
+	// When `insert_waypoints` is true, marked waypoints get a new waypoint
+	// inserted into their source path (right after the source waypoint) instead
+	// of being duplicated into a fresh path.  Other object types are duplicated
+	// either way.  Triggered from Ctrl+Shift+drag in the viewport.
+	int duplicate_marked_objects(bool insert_waypoints = false);
 	int drag_objects(int x, int y);
 
 	int drag_rotate_objects(int mouse_dx, int mouse_dy);
@@ -193,7 +221,10 @@ class EditorViewport {
 
 	bool Group_rotate = true;
 	int  toolbar_icon_size = 24;  ///< Toolbar icon size in pixels (16, 24, or 32)
-	bool Offer_autosave_recovery = true;
+	int  sexp_number_every_n = 5; ///< Show a numbered badge on every Nth argument in sexp trees (0 = disabled)
+	bool Offer_autosave_recovery   = true;
+	int  autosave_interval_seconds = 300;  // 5 minutes; 0 = disabled
+	bool Create_bak_on_save        = true;
 	bool Move_ships_when_undocking = true;
 	bool Always_save_display_names = false;
 	bool Error_checker_checks_potential_issues = true;
@@ -209,7 +240,11 @@ class EditorViewport {
 	bool Show_sexp_help_ship_editor = false;
 	bool Show_sexp_help_wing_editor = false;
 
-	bool Dark_mode = false;
+	ThemeMode Theme_mode = ThemeMode::System;
+
+	DataMenuStyle Data_menu_style = DataMenuStyle::Auto;
+
+	bool Classic_menu_layout = false; // FRED2's Editors and Misc menus instead of the grouped ones
 
 	void saveSettings() const;
 

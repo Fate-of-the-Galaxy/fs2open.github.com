@@ -32,7 +32,7 @@ BackgroundEditorDialog::~BackgroundEditorDialog() = default;
 
 void BackgroundEditorDialog::closeEvent(QCloseEvent* e)
 {
-	_viewport->editor->autosave("background editor");
+	_model->finalizeFogChanges();
 	QDialog::closeEvent(e);
 }
 
@@ -221,22 +221,22 @@ void BackgroundEditorDialog::refreshSunList()
 
 	const auto names = _model->getMissionSunNames();
 
-	const int oldRow = ui->sunsListWidget->currentRow();
-	ui->sunsListWidget->setUpdatesEnabled(false);
-	ui->sunsListWidget->clear();
+	const int oldRow = ui->sunListWidget->currentRow();
+	ui->sunListWidget->setUpdatesEnabled(false);
+	ui->sunListWidget->clear();
 
 	QStringList items;
 	items.reserve(static_cast<int>(names.size()));
 	for (const auto& s : names)
 		items << QString::fromStdString(s);
-	ui->sunsListWidget->addItems(items);
+	ui->sunListWidget->addItems(items);
 
 	if (!items.isEmpty()) {
-		const int clamped = qBound(0, oldRow, ui->sunsListWidget->count() - 1);
-		ui->sunsListWidget->setCurrentRow(clamped);
+		const int clamped = qBound(0, oldRow, ui->sunListWidget->count() - 1);
+		ui->sunListWidget->setCurrentRow(clamped);
 	}
 
-	ui->sunsListWidget->setUpdatesEnabled(true);
+	ui->sunListWidget->setUpdatesEnabled(true);
 
 	updateSunControls();
 }
@@ -272,8 +272,10 @@ void BackgroundEditorDialog::updateNebulaControls()
 	ui->nebulaLightningCombo->setEnabled(enabled);
 	ui->poofsListWidget->setEnabled(enabled);
 	ui->shipTrailsCheckBox->setEnabled(enabled);
-	ui->fogNearDoubleSpinBox->setEnabled(enabled);
-	ui->fogFarDoubleSpinBox->setEnabled(enabled);
+	ui->fog1000mVisDoubleSpinBox->setEnabled(enabled);
+	ui->fogNearDistanceDoubleSpinBox->setEnabled(enabled);
+	ui->fogSkyboxClipDoubleSpinBox->setEnabled(enabled);
+	ui->fogClipDoubleSpinBox->setEnabled(enabled);
 	ui->displayBgsInNebulaCheckbox->setEnabled(enabled);
 	ui->overrideFogPaletteCheckBox->setEnabled(enabled);
 
@@ -296,8 +298,10 @@ void BackgroundEditorDialog::updateNebulaControls()
 	}
 
 	ui->shipTrailsCheckBox->setChecked(_model->getShipTrailsToggled());
-	ui->fogNearDoubleSpinBox->setValue(static_cast<double>(_model->getFogNearMultiplier()));
-	ui->fogFarDoubleSpinBox->setValue(static_cast<double>(_model->getFogFarMultiplier()));
+	ui->fog1000mVisDoubleSpinBox->setValue(static_cast<double>(_model->getFog1000mVisibility()));
+	ui->fogNearDistanceDoubleSpinBox->setValue(static_cast<double>(_model->getFogNearDistance()));
+	ui->fogSkyboxClipDoubleSpinBox->setValue(static_cast<double>(_model->getFogSkyboxClipDistance()));
+	ui->fogClipDoubleSpinBox->setValue(static_cast<double>(_model->getFogClipDistance()));
 	ui->displayBgsInNebulaCheckbox->setChecked(_model->getDisplayBackgroundBitmaps());
 	ui->overrideFogPaletteCheckBox->setChecked(override);
 	ui->fogOverrideRedSpinBox->setValue(_model->getFogR());
@@ -743,14 +747,24 @@ void BackgroundEditorDialog::on_shipTrailsCheckBox_toggled(bool checked)
 	_model->setShipTrailsToggled(checked);
 }
 
-void BackgroundEditorDialog::on_fogNearDoubleSpinBox_valueChanged(double arg1)
+void BackgroundEditorDialog::on_fog1000mVisDoubleSpinBox_valueChanged(double arg1)
 {
-	_model->setFogNearMultiplier(static_cast<float>(arg1));
+	_model->setFog1000mVisibility(static_cast<float>(arg1));
 }
 
-void BackgroundEditorDialog::on_fogFarDoubleSpinBox_valueChanged(double arg1)
+void BackgroundEditorDialog::on_fogNearDistanceDoubleSpinBox_valueChanged(double arg1)
 {
-	_model->setFogFarMultiplier(static_cast<float>(arg1));
+	_model->setFogNearDistance(static_cast<float>(arg1));
+}
+
+void BackgroundEditorDialog::on_fogSkyboxClipDoubleSpinBox_valueChanged(double arg1)
+{
+	_model->setFogSkyboxClipDistance(static_cast<float>(arg1));
+}
+
+void BackgroundEditorDialog::on_fogClipDoubleSpinBox_valueChanged(double arg1)
+{
+	_model->setFogClipDistance(static_cast<float>(arg1));
 }
 
 void BackgroundEditorDialog::on_displayBgsInNebulaCheckbox_toggled(bool checked)
@@ -887,11 +901,6 @@ void BackgroundEditorDialog::on_skyboxBankSpin_valueChanged(double arg1)
 void BackgroundEditorDialog::on_skyboxHeadingSpin_valueChanged(double arg1)
 {
 	_model->setSkyboxHeading(static_cast<float>(arg1));
-}
-
-void BackgroundEditorDialog::on_skyboxNoLightingCheckBox_toggled(bool checked)
-{
-	_model->setSkyboxNoLighting(checked);
 }
 
 void BackgroundEditorDialog::on_noLightingCheckBox_toggled(bool checked)

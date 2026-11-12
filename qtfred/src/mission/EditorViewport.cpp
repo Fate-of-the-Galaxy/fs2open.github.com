@@ -5,6 +5,7 @@
 #include <render/3d.h>
 #include <ship/ship.h>
 #include "ui/ControlBindings.h"
+#include "ui/Theme.h"
 
 #include "object.h"
 
@@ -14,6 +15,7 @@
 #include <jumpnode/jumpnode.h>
 #include <mission/missionparse.h>
 #include <prop/prop.h>
+#include <missioneditor/common.h>
 #include <FredApplication.h>
 
 namespace {
@@ -129,7 +131,10 @@ void EditorViewport::loadSettings() {
 	QSettings settings;
 	settings.beginGroup(SETTINGS_GROUP);
 	toolbar_icon_size                  = settings.value("toolbar_icon_size",                  toolbar_icon_size).toInt();
+	sexp_number_every_n                = settings.value("sexp_number_every_n",                sexp_number_every_n).toInt();
 	Offer_autosave_recovery            = settings.value("offer_autosave_recovery",            Offer_autosave_recovery).toBool();
+	autosave_interval_seconds         = settings.value("autosave_interval_seconds",          autosave_interval_seconds).toInt();
+	Create_bak_on_save                 = settings.value("create_bak_on_save",                 Create_bak_on_save).toBool();
 	Move_ships_when_undocking          = settings.value("move_ships_when_undocking",          Move_ships_when_undocking).toBool();
 	Always_save_display_names          = settings.value("always_save_display_names",          Always_save_display_names).toBool();
 	Error_checker_checks_potential_issues = settings.value("error_checker_checks_potential_issues", Error_checker_checks_potential_issues).toBool();
@@ -139,7 +144,18 @@ void EditorViewport::loadSettings() {
 	Show_sexp_help_mission_cutscenes   = settings.value("show_sexp_help_mission_cutscenes",   Show_sexp_help_mission_cutscenes).toBool();
 	Show_sexp_help_ship_editor         = settings.value("show_sexp_help_ship_editor",         Show_sexp_help_ship_editor).toBool();
 	Show_sexp_help_wing_editor         = settings.value("show_sexp_help_wing_editor",         Show_sexp_help_wing_editor).toBool();
-	Dark_mode                          = settings.value("dark_mode",                          Dark_mode).toBool();
+	// Handles its own group, since main.cpp reads it before the viewport exists.
+	Theme_mode                         = readThemeModeSetting();
+	{
+		// Fall back to the pre-rename key so an existing choice carries over.
+		const int legacyStyle = settings.value("sexp_data_menu_style", static_cast<int>(Data_menu_style)).toInt();
+		const int rawStyle    = settings.value("data_menu_style", legacyStyle).toInt();
+		if (rawStyle >= 0 && rawStyle <= static_cast<int>(DataMenuStyle::Searchable)) {
+			Data_menu_style = static_cast<DataMenuStyle>(rawStyle);
+		}
+	}
+
+	Classic_menu_layout                = settings.value("classic_menu_layout",                Classic_menu_layout).toBool();
 
 	view.Universal_heading                 = settings.value("view_universal_heading",                 view.Universal_heading).toBool();
 	view.Show_stars                        = settings.value("view_show_stars",                        view.Show_stars).toBool();
@@ -163,6 +179,11 @@ void EditorViewport::loadSettings() {
 	view.Show_waypoints                    = settings.value("view_show_waypoints",                    view.Show_waypoints).toBool();
 	view.Show_compass                      = settings.value("view_show_compass",                      view.Show_compass).toBool();
 	view.Highlight_selectable_subsys       = settings.value("view_highlight_selectable_subsys",       view.Highlight_selectable_subsys).toBool();
+	view.Outline_lod                       = settings.value("view_outline_lod",                       view.Outline_lod).toInt();
+	view.Label_font_scale                  = settings.value("view_label_font_scale",                  view.Label_font_scale).toFloat();
+	camera.setInvertOrbitX(settings.value("camera_invert_orbit_x", camera.getInvertOrbitX()).toBool());
+	camera.setInvertOrbitY(settings.value("camera_invert_orbit_y", camera.getInvertOrbitY()).toBool());
+	camera.setOrbitSelectionMidpoint(settings.value("camera_orbit_selection_midpoint", camera.getOrbitSelectionMidpoint()).toBool());
 	settings.endGroup();
 }
 
@@ -170,7 +191,10 @@ void EditorViewport::saveSettings() const {
 	QSettings settings;
 	settings.beginGroup(SETTINGS_GROUP);
 	settings.setValue("toolbar_icon_size",                   toolbar_icon_size);
+	settings.setValue("sexp_number_every_n",                 sexp_number_every_n);
 	settings.setValue("offer_autosave_recovery",             Offer_autosave_recovery);
+	settings.setValue("autosave_interval_seconds",          autosave_interval_seconds);
+	settings.setValue("create_bak_on_save",                  Create_bak_on_save);
 	settings.setValue("move_ships_when_undocking",           Move_ships_when_undocking);
 	settings.setValue("always_save_display_names",           Always_save_display_names);
 	settings.setValue("error_checker_checks_potential_issues", Error_checker_checks_potential_issues);
@@ -180,7 +204,9 @@ void EditorViewport::saveSettings() const {
 	settings.setValue("show_sexp_help_mission_cutscenes",    Show_sexp_help_mission_cutscenes);
 	settings.setValue("show_sexp_help_ship_editor",          Show_sexp_help_ship_editor);
 	settings.setValue("show_sexp_help_wing_editor",          Show_sexp_help_wing_editor);
-	settings.setValue("dark_mode",                           Dark_mode);
+	writeThemeModeSetting(Theme_mode);
+	settings.setValue("data_menu_style",                     static_cast<int>(Data_menu_style));
+	settings.setValue("classic_menu_layout",                 Classic_menu_layout);
 
 	settings.setValue("view_universal_heading",                 view.Universal_heading);
 	settings.setValue("view_show_stars",                        view.Show_stars);
@@ -204,6 +230,11 @@ void EditorViewport::saveSettings() const {
 	settings.setValue("view_show_waypoints",                    view.Show_waypoints);
 	settings.setValue("view_show_compass",                      view.Show_compass);
 	settings.setValue("view_highlight_selectable_subsys",       view.Highlight_selectable_subsys);
+	settings.setValue("view_outline_lod",                       view.Outline_lod);
+	settings.setValue("view_label_font_scale",                  view.Label_font_scale);
+	settings.setValue("camera_invert_orbit_x",                  camera.getInvertOrbitX());
+	settings.setValue("camera_invert_orbit_y",                  camera.getInvertOrbitY());
+	settings.setValue("camera_orbit_selection_midpoint",        camera.getOrbitSelectionMidpoint());
 	settings.endGroup();
 }
 void EditorViewport::needsUpdate() {
@@ -278,7 +309,7 @@ void EditorViewport::select_objects(const Marking_box& box) {
 	ptr = GET_FIRST(&obj_used_list);
 	while (ptr != END_OF_LIST(&obj_used_list)) {
 		valid = 1;
-		if (ptr->flags[Object::Object_Flags::Hidden, Object::Object_Flags::Locked_from_editing]) {
+		if (ptr->flags.any_of(Object::Object_Flags::Hidden,Object::Object_Flags::Locked_from_editing)) {
 			valid = 0;
 		}
 		if (!isObjectVisibleInLayer(ptr)) {
@@ -473,10 +504,9 @@ void EditorViewport::game_do_frame(const int cur_object_index) {
 	}
 
 	if (camera.getLookatMode() && query_valid_object(cur_object_index)) {
-		float dist;
-
-		dist = vm_vec_dist(&camera.view_pos, &Objects[cur_object_index].pos);
-		vm_vec_scale_add(&camera.view_pos, &Objects[cur_object_index].pos, &camera.view_orient.vec.fvec, -dist);
+		vec3d center = selectionMidpoint(cur_object_index);
+		float dist = vm_vec_dist(&camera.view_pos, &center);
+		vm_vec_scale_add(&camera.view_pos, &center, &camera.view_orient.vec.fvec, -dist);
 	}
 
 	switch (camera.getViewpoint()) {
@@ -533,7 +563,6 @@ void EditorViewport::level_controlled() {
 			level_object(&Objects[camera.getViewObj()].orient);
 			object_moved(&Objects[camera.getViewObj()]);
 			///! \todo Notify.
-			editor->autosave("level object");
 			editor->missionChanged();
 		}
 		break;
@@ -560,7 +589,6 @@ void EditorViewport::level_controlled() {
 
 		///! \todo Notify.
 		if (count) {
-			editor->autosave(count > 1 ? "level objects" : "level object");
 			editor->missionChanged();
 		}
 
@@ -589,7 +617,6 @@ void EditorViewport::verticalize_controlled() {
 			verticalize_object(&Objects[camera.getViewObj()].orient);
 			object_moved(&Objects[camera.getViewObj()]);
 			///! \todo notify.
-			editor->autosave("align object");
 			editor->missionChanged();
 		}
 		break;
@@ -616,7 +643,6 @@ void EditorViewport::verticalize_controlled() {
 
 		///! \todo Notify.
 		if (count) {
-			editor->autosave(count > 1 ? "align objects" : "align object");
 			editor->missionChanged();
 		}
 
@@ -640,6 +666,48 @@ void EditorViewport::level_object(matrix* orient) {
 	}
 
 	vm_fix_matrix(orient);
+}
+
+vec3d EditorViewport::selectionMidpoint(int cur_object_index) const
+{
+	vec3d center;
+	float radius;
+
+	if (camera.getOrbitSelectionMidpoint() && editor->getNumMarked() > 1 && get_object_bounds(true, &center, &radius)) {
+		return center;
+	}
+
+	return Objects[cur_object_index].pos;
+}
+
+vec3d EditorViewport::orbitCameraGetPivot()
+{
+	vec3d pivot;
+
+	if (query_valid_object(editor->currentObject)) {
+		// Pivot on the selection
+		pivot = selectionMidpoint(editor->currentObject);
+	} else if (!The_grid) {
+		// Pivot on the origin, if no grid
+		pivot = ZERO_VECTOR;
+	} else {
+		// Intersect camera forward ray with the grid plane
+		vec3d *grid_normal = &The_grid->gmatrix.vec.uvec;
+		float denom = vm_vec_dot(grid_normal, &camera.view_orient.vec.fvec);
+
+		if (fl_abs(denom) > 0.0001f) {
+			float t = -(vm_vec_dot(grid_normal, &camera.view_pos) + The_grid->planeD) / denom;
+			if (t > 0.0f) {
+				vm_vec_scale_add(&pivot, &camera.view_pos, &camera.view_orient.vec.fvec, t);
+			} else {
+				pivot = The_grid->center;
+			}
+		} else {
+			// Camera is parallel to grid plane; fall back to grid center
+			pivot = The_grid->center;
+		}
+	}
+	return pivot;
 }
 
 int EditorViewport::object_check_collision(object* objp, vec3d* p0, vec3d* p1, vec3d* hitpos) {
@@ -675,22 +743,26 @@ int EditorViewport::object_check_collision(object* objp, vec3d* p0, vec3d* p1, v
 		return 0;
 	}
 
-	if (objp->flags[Object::Object_Flags::Hidden, Object::Object_Flags::Locked_from_editing]) {
+	if (objp->flags.any_of(Object::Object_Flags::Hidden,Object::Object_Flags::Locked_from_editing)) {
 		return 0;
 	}
 	if (!isObjectVisibleInLayer(objp)) {
 		return 0;
 	}
 
-	if ((view.Show_ship_models || view.Show_outlines) && (objp->type == OBJ_SHIP)) {
-		mc.model_num = Ship_info[Ships[objp->instance].ship_info_index].model_num; // Fill in the model to check
-	} else if ((view.Show_ship_models || view.Show_outlines) && (objp->type == OBJ_START)) {
-		mc.model_num = Ship_info[Ships[objp->instance].ship_info_index].model_num; // Fill in the model to check
+	mc.model_instance_num = -1;
+
+	if ((view.Show_ship_models || view.Show_outlines) && (objp->type == OBJ_SHIP || objp->type == OBJ_START)) {
+		auto& shp = Ships[objp->instance];
+		mc.model_num = Ship_info[shp.ship_info_index].model_num;			// Fill in the model to check
+		mc.model_instance_num = shp.model_instance_num;
+	} else if ((view.Show_ship_models || view.Show_outlines) && (objp->type == OBJ_PROP)) {
+		auto& prp = Props[objp->instance].value();
+		mc.model_num = Prop_info[prp.prop_info_index].model_num;			// Fill in the model to check
+		mc.model_instance_num = prp.model_instance_num;
 	} else {
 		return fvi_ray_sphere(hitpos, p0, p1, &objp->pos, (objp->radius > 0.1f) ? objp->radius : LOLLIPOP_SIZE);
 	}
-
-	mc.model_instance_num = -1;
 	mc.orient = &objp->orient; // The object's orient
 	mc.pos = &objp->pos; // The object's position
 	mc.p0 = p0; // Point 1 of ray to check
@@ -902,6 +974,56 @@ bool EditorViewport::deleteLayer(const SCP_string& name, SCP_string* errorMessag
 	return true;
 }
 
+bool EditorViewport::renameLayer(const SCP_string& oldName, const SCP_string& newName, SCP_string* errorMessage) {
+	if (newName.empty()) {
+		if (errorMessage != nullptr) {
+			*errorMessage = "Layer name cannot be empty.";
+		}
+		return false;
+	}
+
+	const auto layerIndex = getLayerIndex(oldName);
+	if (layerIndex == static_cast<size_t>(-1)) {
+		if (errorMessage != nullptr) {
+			*errorMessage = "Layer does not exist.";
+		}
+		return false;
+	}
+	if (layerIndex == 0) {
+		if (errorMessage != nullptr) {
+			*errorMessage = "The default layer cannot be renamed.";
+		}
+		return false;
+	}
+
+	// Reject collisions with a different layer; a case-only rename resolves to the same index and is allowed.
+	const auto existingIndex = getLayerIndex(newName);
+	if (existingIndex != static_cast<size_t>(-1) && existingIndex != layerIndex) {
+		if (errorMessage != nullptr) {
+			*errorMessage = "Layer names must be unique.";
+		}
+		return false;
+	}
+
+	_layerNames[layerIndex] = newName;
+
+	// Rewrite the per-object fred_layer string on every object assigned to this layer.
+	std::vector<int> toResync;
+	for (const auto& objectLayer : _objectLayers) {
+		if (objectLayer.second == layerIndex) {
+			toResync.push_back(objectLayer.first);
+		}
+	}
+	for (int objIdx : toResync) {
+		setObjectLayerByIndex(objIdx, layerIndex);
+	}
+
+	syncMissionLayerNames();
+	editor->notifyLayerStructureChanged();
+	editor->notifyLayerListChanged();
+	return true;
+}
+
 bool EditorViewport::setLayerVisibility(const SCP_string& name, bool visible, SCP_string* errorMessage) {
 	const auto layerIndex = getLayerIndex(name);
 	if (layerIndex == static_cast<size_t>(-1)) {
@@ -1002,6 +1124,47 @@ void EditorViewport::reloadLayersFromMission() {
 	}
 
 	needsUpdate();
+}
+
+void EditorViewport::registerObjectInLayer(int objectIndex) {
+	if (objectIndex < 0 || objectIndex >= MAX_OBJECTS) {
+		return;
+	}
+	auto* objp = &Objects[objectIndex];
+	if (objp->type == OBJ_NONE) {
+		return;
+	}
+
+	SCP_string layerName;
+	switch (objp->type) {
+	case OBJ_SHIP:
+	case OBJ_START:
+		layerName = Ships[objp->instance].fred_layer;
+		break;
+	case OBJ_PROP:
+		if (auto* p = prop_id_lookup(objp->instance)) {
+			layerName = p->fred_layer;
+		}
+		break;
+	case OBJ_JUMP_NODE:
+		if (auto* jn = jumpnode_get_by_objnum(objectIndex)) {
+			layerName = jn->GetFredLayer();
+		}
+		break;
+	case OBJ_WAYPOINT:
+		if (auto* wl = find_waypoint_list_with_instance(objp->instance, nullptr)) {
+			layerName = wl->get_fred_layer();
+		}
+		break;
+	default:
+		return;
+	}
+
+	auto layerIndex = getLayerIndex(layerName);
+	if (layerIndex == static_cast<size_t>(-1)) {
+		layerIndex = 0;
+	}
+	_objectLayers[objectIndex] = layerIndex;
 }
 
 SCP_string EditorViewport::getObjectLayerName(int objectIndex) const {
@@ -1109,7 +1272,6 @@ int EditorViewport::create_object_on_grid(int x, int y, int waypoint_instance, C
 		editor->markObject(obj);
 
 		editor->missionChanged();
-		editor->autosave("object create");
 
 	} else if (obj == -1) {
 		dialogProvider->showButtonDialog(DialogType::Error, "Error", "Maximum ship limit reached.  Can't add any more ships.", { DialogButton::Ok });
@@ -1229,7 +1391,7 @@ void EditorViewport::initialSetup() {
 	}
 }
 
-int EditorViewport::duplicate_marked_objects()
+int EditorViewport::duplicate_marked_objects(bool insert_waypoints)
 {
 	int z, cobj, flag;
 	object *objp, *ptr;
@@ -1254,24 +1416,41 @@ int EditorViewport::duplicate_marked_objects()
 				Duped_wing = -1;
 			}
 
-			// make sure we dup as many waypoint lists as we have
-			if (objp->type == OBJ_WAYPOINT) {
-				int this_list = calc_waypoint_list_index(objp->instance);
-				if (duping_waypoint_list != this_list) {
-					editor->dup_object(nullptr);  // reset waypoint list
-					duping_waypoint_list = this_list;
-				}
-			}
-
 			flag = 1;
-			z = editor->dup_object(objp);
-			if (z == -1) {
-				cobj = -1;
-				break;
-			}
 
-			if (editor->currentObject == OBJ_INDEX(objp) )
-				cobj = z;
+			if (insert_waypoints && objp->type == OBJ_WAYPOINT) {
+				// Insert a new waypoint into the source path right after this one.
+				// No new list is created, so no list-property copy is needed.
+				z = waypoint_add(&objp->pos, objp->instance, false);
+				if (z < 0) {
+					cobj = -1;
+					break;
+				}
+				Objects[z].pos = objp->pos;
+				Objects[z].orient = objp->orient;
+				Objects[z].flags.set(Object::Object_Flags::Temp_marked);
+				registerObjectInLayer(z);
+				if (editor->currentObject == OBJ_INDEX(objp))
+					cobj = z;
+			} else {
+				// make sure we dup as many waypoint lists as we have
+				if (objp->type == OBJ_WAYPOINT) {
+					int this_list = calc_waypoint_list_index(objp->instance);
+					if (duping_waypoint_list != this_list) {
+						editor->dup_object(nullptr);  // reset waypoint list
+						duping_waypoint_list = this_list;
+					}
+				}
+
+				z = editor->dup_object(objp);
+				if (z == -1) {
+					cobj = -1;
+					break;
+				}
+
+				if (editor->currentObject == OBJ_INDEX(objp))
+					cobj = z;
+			}
 		}
 
 		objp = GET_NEXT(objp);
@@ -1350,12 +1529,9 @@ int EditorViewport::drag_objects(int x, int y)
 	if (!query_valid_object(editor->currentObject) || camera.getLookatMode())
 		return -1;
 
-	if (Dup_drag == 1) {
-		Dup_drag = 0;
-	}
-
-	if (Dup_drag == 1) {
-		if (duplicate_marked_objects() < 0)
+	if (Dup_drag == 1 || Dup_drag == DUP_DRAG_INSERT) {
+		const bool insert_waypoints = (Dup_drag == DUP_DRAG_INSERT);
+		if (duplicate_marked_objects(insert_waypoints) < 0)
 			return -1;
 
 		if (Duped_wing != -1)
@@ -1586,58 +1762,15 @@ void EditorViewport::cancel_drag() {
 	needsUpdate();
 }
 void EditorViewport::view_universe(bool just_marked) {
-	int max = 0;
-	float dist, largest = 20.0f;
-	vec3d center, p1, p2;
+	float dist, radius;
+	vec3d center;
 	vertex v;
 	object *ptr;
 
-	if (just_marked)
-		ptr = &Objects[editor->currentObject];
-	else
-		ptr = GET_FIRST(&obj_used_list);
+	if (!get_object_bounds(just_marked, &center, &radius))
+		return;
 
-	p1.xyz.x = p2.xyz.x = ptr->pos.xyz.x;
-	p1.xyz.y = p2.xyz.y = ptr->pos.xyz.y;
-	p1.xyz.z = p2.xyz.z = ptr->pos.xyz.z;
-
-	ptr = GET_FIRST(&obj_used_list);
-	while (ptr != END_OF_LIST(&obj_used_list)) {
-		if (!just_marked || (ptr->flags[Object::Object_Flags::Marked])) {
-			center = ptr->pos;
-			if (center.xyz.x < p1.xyz.x)
-				p1.xyz.x = center.xyz.x;
-			if (center.xyz.x > p2.xyz.x)
-				p2.xyz.x = center.xyz.x;
-			if (center.xyz.y < p1.xyz.y)
-				p1.xyz.y = center.xyz.y;
-			if (center.xyz.y > p2.xyz.y)
-				p2.xyz.y = center.xyz.y;
-			if (center.xyz.z < p1.xyz.z)
-				p1.xyz.z = center.xyz.z;
-			if (center.xyz.z > p2.xyz.z)
-				p2.xyz.z = center.xyz.z;
-		}
-
-		ptr = GET_NEXT(ptr);
-	}
-
-	vm_vec_avg(&center, &p1, &p2);
-	ptr = GET_FIRST(&obj_used_list);
-	while (ptr != END_OF_LIST(&obj_used_list)) {
-		if (!just_marked || (ptr->flags[Object::Object_Flags::Marked])) {
-			dist = vm_vec_dist_squared(&center, &ptr->pos);
-			if (dist > largest)
-				largest = dist;
-
-			if (OBJ_INDEX(ptr) > max)
-				max = OBJ_INDEX(ptr);
-		}
-
-		ptr = GET_NEXT(ptr);
-	}
-
-	dist = fl_sqrt(largest) + 1.0f;
+	dist = std::max(radius, fl_sqrt(20.0f)) + 1.0f;
 	vm_vec_scale_add(&camera.view_pos, &center, &camera.view_orient.vec.fvec, -dist);
 	g3_set_view_matrix(&camera.view_pos, &camera.view_orient, 0.5f);
 

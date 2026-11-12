@@ -195,11 +195,22 @@ void SceneBrowserModel::toggleLayerVisibility(const QString& layerName)
 	// setLayerVisibility calls editor->notifyLayerVisibilityChanged() → onLayerVisibilityChanged()
 }
 
+bool SceneBrowserModel::renameLayer(const QString& oldName, const QString& newName, SCP_string* error)
+{
+	// renameLayer fires editor->notifyLayerStructureChanged() → onLayerStructureChanged(),
+	// which rebuilds the tree, so there is nothing extra to do on success here.
+	return _viewport->renameLayer(oldName.toUtf8().constData(), newName.toUtf8().constData(), error);
+}
+
+bool SceneBrowserModel::isDefaultLayer(const QString& name)
+{
+	return name.toUtf8().constData() == SCP_string(EditorViewport::DefaultLayerName);
+}
+
 void SceneBrowserModel::moveObjectToLayer(int objNum, const QString& layerName)
 {
 	// Single inline call: temporary QByteArray lives until end of full expression — safe.
 	_viewport->moveObjectToLayer(objNum, layerName.toUtf8().constData());
-	_editor->autosave("move object to layer");
 	buildTree();
 	treeStructureChanged();
 }
@@ -216,7 +227,6 @@ void SceneBrowserModel::moveWingToLayer(int wingIndex, const QString& layerName)
 			_viewport->moveObjectToLayer(objNum, layer.constData());
 		}
 	}
-	_editor->autosave("move wing to layer");
 	buildTree();
 	treeStructureChanged();
 }
@@ -230,7 +240,6 @@ void SceneBrowserModel::moveWaypointPathToLayer(int waypointListIndex, const QSt
 	if (!wl.get_waypoints().empty()) {
 		_viewport->moveObjectToLayer(wl.get_waypoints().front().get_objnum(), layerName.toUtf8().constData());
 	}
-	_editor->autosave("move waypoint path to layer");
 	buildTree();
 	treeStructureChanged();
 }
@@ -298,16 +307,30 @@ void SceneBrowserModel::setNameFilter(const QString& filter)
 // Signal handlers
 // ---------------------------------------------------------------------------
 
+void SceneBrowserModel::scheduleSelectionSync()
+{
+	// Bulk selection changes fire one signal per object, so coalesce
+	// the burst into a single refresh once the event loop settles.
+	if (_syncPending) {
+		return;
+	}
+	_syncPending = true;
+	QTimer::singleShot(0, this, [this] {
+		_syncPending = false;
+		modelChanged();
+	});
+}
+
 void SceneBrowserModel::onCurrentObjectChanged(int /*newObj*/)
 {
 	if (_updatingFromBrowser) return;
-	modelChanged();
+	scheduleSelectionSync();
 }
 
 void SceneBrowserModel::onObjectMarkingChanged(int /*obj*/, bool /*marked*/)
 {
 	if (_updatingFromBrowser) return;
-	modelChanged();
+	scheduleSelectionSync();
 }
 
 void SceneBrowserModel::onLayerVisibilityChanged()

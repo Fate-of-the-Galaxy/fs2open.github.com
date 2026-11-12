@@ -35,6 +35,8 @@ extern const std::shared_ptr<Hook<>>									OnMouseReleased;
 
 extern const std::shared_ptr<Hook<ShipSourceConditions>>				OnAfterburnerStart;
 extern const std::shared_ptr<Hook<ShipSourceConditions>>				OnAfterburnerEnd;
+extern const std::shared_ptr<Hook<>>                                    OnSupportRearmStarted;
+extern const std::shared_ptr<Hook<>>                                    OnSupportRearmFinished;
 extern const std::shared_ptr<Hook<ShipSourceConditions>>				OnWaypointsDone;
 extern const std::shared_ptr<Hook<ShipSourceConditions>>				OnGoalsCleared;
 
@@ -55,6 +57,7 @@ extern const std::shared_ptr<Hook<ShipDeathConditions>>					OnShipDeathStarted;
 extern const std::shared_ptr<OverridableHook<ShipDeathConditions>>		OnShipDeath;
 extern const std::shared_ptr<Hook<WeaponDeathConditions>>				OnMissileDeathStarted;
 extern const std::shared_ptr<Hook<WeaponDeathConditions>>				OnMissileDeath;
+extern const std::shared_ptr<OverridableHook<WeaponProximityTriggeredConditions>>	OnWeaponProximityTriggered;
 extern const std::shared_ptr<Hook<>>									OnBeamDeath;
 extern const std::shared_ptr<Hook<>>									OnAsteroidDeath;
 extern const std::shared_ptr<Hook<>>									OnDebrisDeath;
@@ -96,6 +99,8 @@ extern const std::shared_ptr<OverridableHook<>>							OnMissionEndHook;
 extern const std::shared_ptr<Hook<>>									OnStateAboutToEndHook;
 extern const std::shared_ptr<OverridableHook<>>							OnStateEndHook;
 extern const std::shared_ptr<Hook<>>									OnCameraSetUpHook;
+
+extern const std::shared_ptr<Hook<ShipDamageConditions>>					OnShipDamage;
 
 // FRED Hooks
 extern const std::shared_ptr<Hook<>>                                    FredOnMissionLoad;

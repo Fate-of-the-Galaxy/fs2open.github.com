@@ -25,6 +25,7 @@
 #include "hud/hud.h"
 #include "hud/hudartillery.h"
 #include "iff_defs/iff_defs.h"
+#include "species_defs/species_defs.h"
 #include "io/joy_ff.h"
 #include "io/timer.h"
 #include "math/curve.h"
@@ -43,6 +44,7 @@
 #include "parse/parsehi.h"
 #include "parse/parselo.h"
 #include "scripting/global_hooks.h"
+#include "scripting/api/objs/vecmath.h"
 #include "particle/particle.h"
 #include "playerman/player.h"
 #include "radar/radar.h"
@@ -64,6 +66,7 @@
 #include "particle/volumes/PointVolume.h"
 #include "tracing/Monitor.h"
 #include "tracing/tracing.h"
+#include "utils/string_utils.h"
 #include "weapon.h"
 #include "model/modelrender.h"
 
@@ -84,6 +87,11 @@ typedef struct delayed_ssm_index_data {
 SCP_unordered_map<SCP_string, delayed_ssm_index_data> Delayed_SSM_indices_data;
 SCP_vector<SCP_string> Delayed_SSM_indices;
 
+// Temporary storage for proximity type/class names pending resolution after ship_init().
+// Keyed by weapon_info_index (not name) so a duplicate-named entry can't clobber another's pending list.
+static SCP_unordered_map<int, SCP_vector<SCP_string>> Pending_proximity_type_names;
+static SCP_unordered_map<int, SCP_vector<SCP_string>> Pending_proximity_class_names;
+
 
 #ifndef NDEBUG
 int Weapon_flyby_sound_enabled = 1;
@@ -102,8 +110,7 @@ missile_obj Missile_obj_list;						// head of linked list of missile_obj structs
 
 #define DEFAULT_WEAPON_SPAWN_COUNT	10
 
-int	Num_spawn_types = 0;
-char** Spawn_names = nullptr;
+SCP_vector<SCP_string> Spawn_names;
 
 //WEAPON SUBTYPE STUFF
 const char *Weapon_subtype_names[] = {
@@ -135,14 +142,8 @@ special_flag_def_list_new<Weapon::Info_Flags, weapon_info*, flagset<Weapon::Info
 	{ "spawn",							Weapon::Info_Flags::Spawn,								true, [](const SCP_string& spawn, weapon_info* weaponp, flagset<Weapon::Info_Flags>& flags) {
 		if (weaponp->num_spawn_weapons_defined < MAX_SPAWN_TYPES_PER_WEAPON)
 		{
-			//We need more spawning slots
-			//allocate in slots of 10
-			if ((Num_spawn_types % 10) == 0) {
-				Spawn_names = (char**)vm_realloc(Spawn_names, (Num_spawn_types + 10) * sizeof(*Spawn_names));
-			}
-
 			flags.set(Weapon::Info_Flags::Spawn);
-			weaponp->spawn_info[weaponp->num_spawn_weapons_defined].spawn_wep_index = (short)Num_spawn_types;
+			weaponp->spawn_info[weaponp->num_spawn_weapons_defined].spawn_wep_index = (short)Spawn_names.size();
 			size_t start_num = spawn.find_first_of(',');
 			if (start_num == SCP_string::npos) {
 				weaponp->spawn_info[weaponp->num_spawn_weapons_defined].spawn_count = DEFAULT_WEAPON_SPAWN_COUNT;
@@ -154,8 +155,7 @@ special_flag_def_list_new<Weapon::Info_Flags, weapon_info*, flagset<Weapon::Info
 
 			weaponp->maximum_children_spawned += weaponp->spawn_info[weaponp->num_spawn_weapons_defined].spawn_count;
 
-			Spawn_names[Num_spawn_types] = vm_strndup(spawn.substr(0, start_num).c_str(), start_num);
-			Num_spawn_types++;
+			Spawn_names.push_back(spawn.substr(0, start_num));
 			weaponp->num_spawn_weapons_defined++;
 		}
 		else {
@@ -260,6 +260,7 @@ special_flag_def_list_new<Weapon::Info_Flags, weapon_info*, flagset<Weapon::Info
 		}
 	}}, //special case
 	{"dogfight variant",                Weapon::Info_Flags::Dogfight_weapon,                    true},
+	{"mine",                            Weapon::Info_Flags::Mine,                               true},
 };
 
 const size_t num_weapon_info_flags = sizeof(Weapon_Info_Flags) / sizeof(special_flag_def_list_new<Weapon::Info_Flags, weapon_info*, flagset<Weapon::Info_Flags>&>);
@@ -379,17 +380,6 @@ int weapon_info_lookup(const char *name)
 			return (int)std::distance(Weapon_info.cbegin(), it);
 
 	return -1;
-}
-
-/**
- * Return the index of Weapon_info used by this pointer.  Equivalent to the old WEAPON_INFO_INDEX macro:
- * #define WEAPON_INFO_INDEX(wip)		(int)(wip-Weapon_info)
- */
-int weapon_info_get_index(const weapon_info *wip)
-{
-	Assertion(wip != nullptr, "NULL wip passed to weapon_info_get_index");
-	const weapon_info *data = Weapon_info.data();
-	return static_cast<int>(std::distance(data, wip));
 }
 
 //	Parse the weapon flags.
@@ -691,7 +681,11 @@ static particle::ParticleEffectHandle convertLegacyPspewBuffer(const pspew_legac
 
 			auto vel_vol_temp = std::make_unique<particle::PointVolume>();
 			vel_vol_temp->posOffset = vec3d {{{pspew_buffer.particle_spew_scale, 0.f, 0.f}}};
-			vel_vol_temp->m_modular_curves.add_curve("Time Running", particle::PointVolume::VolumeModularCurveOutput::OFFSET_ROT, modular_curves_entry{curve_id, ::util::UniformFloatRange(1.f), ::util::UniformFloatRange(0.f, 1.f / pspew_buffer.particle_spew_rotation_rate), true});
+			float rot_rnd_min = 0.f;
+			float rot_rnd_max = 1.0f / pspew_buffer.particle_spew_rotation_rate;
+			if (rot_rnd_max < rot_rnd_min)
+				std::swap(rot_rnd_min, rot_rnd_max);
+			vel_vol_temp->m_modular_curves.add_curve("Time Running", particle::PointVolume::VolumeModularCurveOutput::OFFSET_ROT, modular_curves_entry{curve_id, ::util::UniformFloatRange(1.f), ::util::UniformFloatRange(rot_rnd_min, rot_rnd_max), true});
 			velocity_vol = std::move(vel_vol_temp);
 		}
 			break;
@@ -735,7 +729,7 @@ static particle::ParticleEffectHandle convertLegacyPspewBuffer(const pspew_legac
 			absolutePositionVelocityInherit = true;
 			break;
 		default:
-			UNREACHABLE("Invalid PSPEW legacy type!");
+			UNREACHABLE("Invalid PSPEW legacy type %d!", pspew_buffer.particle_spew_type);
 	}
 
 	return particle::ParticleManager::get()->addEffect(particle::ParticleEffect(
@@ -859,11 +853,6 @@ int parse_weapon(int subtype, bool replace, const char *filename)
 			}
 
 			return -1;
-		}
-
-		// Check if there are too many weapon classes
-		if (Weapon_info.size() >= MAX_WEAPON_TYPES) {
-			Error(LOCATION, "Too many weapon classes before '%s'; maximum is %d.\n", fname, MAX_WEAPON_TYPES);
 		}
 
 		w_id = weapon_info_size();
@@ -1348,6 +1337,148 @@ int parse_weapon(int subtype, bool replace, const char *filename)
 
 	if(optional_string("$Detonation Radius:")) {
 		stuff_float(&wip->det_radius);
+	}
+
+	// Generic proximity detonation. Any weapon (mine, flak, missile, etc.) can opt in by setting
+	// $Proximity Radius:. The mine-specific behavior (chase, sensors range, etc.) lives in $MineInfo:.
+	if (optional_string("$Proximity Radius:")) {
+		stuff_float(&wip->proximity_radius);
+		if (wip->proximity_radius <= 0.0f) {
+			wip->proximity_radius = 1.0f;
+			error_display(0, "Weapon '%s': $Proximity Radius must be positive. Setting to 1.\n", wip->name);
+		}
+
+		if (optional_string("+Proximity IFF:")) {
+			// Replace (not append) on a modular override, matching the Type/Class lists below.
+			wip->proximity_iff.clear();
+			SCP_vector<SCP_string> iff_names;
+			stuff_string_list(iff_names);
+			for (const SCP_string& iff_name : iff_names) {
+				int iff_idx = iff_lookup(iff_name.c_str());
+				if (iff_idx < 0)
+					error_display(0, "Weapon '%s': +Proximity IFF entry '%s' not found.\n", wip->name, iff_name.c_str());
+				else
+					wip->proximity_iff.push_back(iff_idx);
+			}
+		}
+
+		if (optional_string("+Proximity Species:")) {
+			wip->proximity_species.clear();
+			SCP_vector<SCP_string> species_names;
+			stuff_string_list(species_names);
+			for (const SCP_string& species_name : species_names) {
+				int species_idx = species_info_lookup(species_name.c_str());
+				if (species_idx < 0)
+					error_display(0, "Weapon '%s': +Proximity Species entry '%s' not found.\n", wip->name, species_name.c_str());
+				else
+					wip->proximity_species.push_back(species_idx);
+			}
+		}
+
+		const int wi_index = static_cast<int>(wip - Weapon_info.data());
+
+		if (optional_string("+Proximity Type:")) {
+			stuff_string_list(Pending_proximity_type_names[wi_index]);
+		}
+
+		if (optional_string("+Proximity Class:")) {
+			stuff_string_list(Pending_proximity_class_names[wi_index]);
+		}
+
+		// Launcher-relative filter: hostile/friendly/neutral, combinable. Default (no entry) = any relation.
+		if (optional_string("+Proximity Relation:")) {
+			// Rebuild from scratch on a modular override rather than OR-ing onto prior bits.
+			wip->proximity_relation_mask = 0;
+			SCP_vector<SCP_string> relation_names;
+			stuff_string_list(relation_names);
+			for (const SCP_string& rel : relation_names) {
+				if (!stricmp(rel.c_str(), "hostile"))
+					wip->proximity_relation_mask |= Weapon::Proximity::Relation_Hostile;
+				else if (!stricmp(rel.c_str(), "friendly"))
+					wip->proximity_relation_mask |= Weapon::Proximity::Relation_Friendly;
+				else if (!stricmp(rel.c_str(), "neutral"))
+					wip->proximity_relation_mask |= Weapon::Proximity::Relation_Neutral;
+				else
+					error_display(0, "Weapon '%s': +Proximity Relation entry '%s' is not one of hostile/friendly/neutral.\n", wip->name, rel.c_str());
+			}
+		}
+
+		if (optional_string("+Detonate Chance:")) {
+			stuff_float(&wip->proximity_detonate_chance);
+			if (wip->proximity_detonate_chance < 0.0f || wip->proximity_detonate_chance > 1.0f) {
+				CLAMP(wip->proximity_detonate_chance, 0.0f, 1.0f);
+				error_display(0, "Weapon '%s': +Detonate Chance must be in [0.0, 1.0]. Clamping.\n", wip->name);
+			}
+		}
+
+		if (optional_string("+Stealth Proximity Multiplier:")) {
+			stuff_float(&wip->proximity_stealth_multiplier);
+			if (wip->proximity_stealth_multiplier < 0.0f) {
+				wip->proximity_stealth_multiplier = 0.0f;
+				error_display(0, "Weapon '%s': +Stealth Proximity Multiplier cannot be negative. Setting to 0.\n", wip->name);
+			}
+		}
+	}
+
+	if (optional_string("$MineInfo:")) {
+		wip->wi_flags.set(Weapon::Info_Flags::Mine);
+
+		// Mines without an explicit $Proximity Radius: get the historical default
+		if (wip->proximity_radius <= 0.0f)
+			wip->proximity_radius = 50.0f;
+
+		if (optional_string("+Sensors Range:")) {
+			stuff_float(&wip->mine_sensors_range);
+			if (wip->mine_sensors_range < 0.0f) {
+				wip->mine_sensors_range = 0.0f;
+				error_display(0, "Mine weapon '%s': +Sensors Range cannot be negative. Setting to 0.\n", wip->name);
+			}
+		}
+
+		if (optional_string("+Targetable Range:")) {
+			stuff_float(&wip->mine_targetable_range);
+			if (wip->mine_targetable_range < 0.0f) {
+				wip->mine_targetable_range = 0.0f;
+				error_display(0, "Mine weapon '%s': +Targetable Range cannot be negative. Setting to 0.\n", wip->name);
+			}
+		}
+
+		// Mines must have finite detection ranges. Defaults scale off proximity_radius so a tiny
+		// proximity radius doesn't accidentally produce a galaxy-spanning blip.
+		if (wip->mine_sensors_range < 0.0f)
+			wip->mine_sensors_range = wip->proximity_radius * 60.0f;
+		if (wip->mine_targetable_range < 0.0f)
+			wip->mine_targetable_range = wip->proximity_radius * 30.0f;
+
+		if (optional_string("+Chase Duration:")) {
+			stuff_float(&wip->mine_chase_duration);
+			if (wip->mine_chase_duration < 0.0f) {
+				wip->mine_chase_duration = 0.0f;
+				error_display(0, "Mine weapon '%s': +Chase Duration cannot be negative. Setting to 0 (immediate detonation).\n", wip->name);
+			}
+		}
+
+		if (optional_string("+Detonates on Chase Timeout:")) {
+			stuff_boolean(&wip->mine_detonates_on_chase_timeout);
+		}
+
+		if (optional_string("+Chase Cooldown:")) {
+			stuff_float(&wip->mine_chase_cooldown);
+			if (wip->mine_chase_cooldown < 0.0f) {
+				wip->mine_chase_cooldown = 0.0f;
+				error_display(0, "Mine weapon '%s': +Chase Cooldown cannot be negative. Setting to 0.\n", wip->name);
+			}
+		}
+
+		// The sensors envelope must encompass the targetable range: anything close enough to lock
+		// must also be detectable. If a mine is authored with a larger targetable range, grow the
+		// sensors range to match so a mine can never be "targetable but beyond sensors range".
+		// (When the two ranges coincide there is simply no distorted-blip phase, which is fine.)
+		if (wip->mine_targetable_range > wip->mine_sensors_range) {
+			error_display(0, "Mine weapon '%s': +Targetable Range (%.1f) exceeds +Sensors Range (%.1f). Raising Sensors Range to match; the distorted blip state will never occur.\n",
+				wip->name, wip->mine_targetable_range, wip->mine_sensors_range);
+			wip->mine_sensors_range = wip->mine_targetable_range;
+		}
 	}
 
 	if(optional_string("$Flak Detonation Accuracy:")) {
@@ -1975,6 +2106,10 @@ int parse_weapon(int subtype, bool replace, const char *filename)
 		} else {
 			wip->reloaded_per_batch = REARM_NUM_BALLISTIC_PRIMARIES_PER_BATCH;
 		}
+	}
+
+	if (optional_string("$Disallow Support Rearm:")) {
+		stuff_boolean(&wip->disallow_rearm);
 	}
 	   
 	if (optional_string("+Weapon Range:")) {
@@ -2784,6 +2919,36 @@ int parse_weapon(int subtype, bool replace, const char *filename)
 			wip->spawn_info[spawn_weap].spawn_effect = particle::util::parseEffect(wip->name);
 			spawn_weap++;
 		}
+	}
+
+	spawn_weap = 0;
+
+	while (optional_string("$Spawn Aimed:"))
+	{
+		bool dum_bool;
+		stuff_boolean(&dum_bool);
+		if (spawn_weap < MAX_SPAWN_TYPES_PER_WEAPON)
+			wip->spawn_info[spawn_weap++].spawn_aimed = dum_bool;
+	}
+
+	spawn_weap = 0;
+
+	while (optional_string("$Spawn Aim Lead:"))
+	{
+		stuff_float(&dum_float);
+		if (spawn_weap < MAX_SPAWN_TYPES_PER_WEAPON) {
+			if (dum_float < 0.0f) {
+				error_display(0, "Weapon '%s': $Spawn Aim Lead cannot be negative. Setting to 0.\n", wip->name);
+				dum_float = 0.0f;
+			}
+			wip->spawn_info[spawn_weap++].spawn_aim_lead = dum_float;
+		}
+	}
+
+	// Cross-validate aimed spawn fields
+	for (int si = 0; si < wip->num_spawn_weapons_defined; si++) {
+		if (wip->spawn_info[si].spawn_aim_lead > 0.0f && !wip->spawn_info[si].spawn_aimed)
+			error_display(0, "Weapon '%s' spawn %d: $Spawn Aim Lead is set but $Spawn Aimed is NO. Lead will be ignored.\n", wip->name, si);
 	}
 
 	if (optional_string("$Lifetime Variation Factor When Child:"))
@@ -3705,7 +3870,7 @@ int parse_weapon(int subtype, bool replace, const char *filename)
 				wip->particle_spewers[spew_index] = particle::util::parseEffect(wip->name);
 			}
 			else { // we have a valid index, now parse the spewer already
-				auto& pspew_buffer = pspew_legacy_parse_data_buffer[weapon_info_get_index(wip)][spew_index];
+				auto& pspew_buffer = pspew_legacy_parse_data_buffer[WEAPON_INFO_INDEX(wip)][spew_index];
 				if (pspew_buffer.particle_spew_type == PSPEW_NONE) {
 					//This must be an uninitialized effect, store defaults.
 					pspew_buffer.particle_spew_count = 1;
@@ -3808,7 +3973,7 @@ int parse_weapon(int subtype, bool replace, const char *filename)
 			if (wip->particle_spewers.empty()) {
 				wip->particle_spewers.emplace_back(particle::ParticleEffectHandle::invalid());
 			}
-			auto& pspew_buffer = pspew_legacy_parse_data_buffer[weapon_info_get_index(wip)][0];
+			auto& pspew_buffer = pspew_legacy_parse_data_buffer[WEAPON_INFO_INDEX(wip)][0];
 			pspew_buffer.particle_spew_count = 1;
 			pspew_buffer.particle_spew_time = 25;
 			pspew_buffer.particle_spew_vel = 0.4f;
@@ -3959,13 +4124,20 @@ int parse_weapon(int subtype, bool replace, const char *filename)
 
 	if (optional_string("$Weapon Hitpoints:")) {
 		stuff_int(&wip->weapon_hitpoints);
-	} else if (first_time && (wip->wi_flags[Weapon::Info_Flags::Turret_Interceptable, Weapon::Info_Flags::Fighter_Interceptable])) {
-		wip->weapon_hitpoints = 25;
+	} else if (first_time && (wip->wi_flags.any_of(Weapon::Info_Flags::Turret_Interceptable,Weapon::Info_Flags::Fighter_Interceptable,Weapon::Info_Flags::Mine))) {
+		wip->weapon_hitpoints = wip->is_mine() ? 50 : 25; // mines are tankier by default, like bombs
 	}
 
 	// making sure bombs get their hitpoints assigned
 	if ((wip->wi_flags[Weapon::Info_Flags::Bomb]) && (wip->weapon_hitpoints == 0)) {
 		wip->weapon_hitpoints = 50;
+	}
+
+	// mines with hitpoints are destructible, so let turrets and fighters intercept them
+	// (explicit "$Weapon Hitpoints: 0" leaves a mine indestructible and unflagged on purpose)
+	if (wip->is_mine() && wip->weapon_hitpoints > 0) {
+		wip->wi_flags.set(Weapon::Info_Flags::Turret_Interceptable);
+		wip->wi_flags.set(Weapon::Info_Flags::Fighter_Interceptable);
 	}
 
 	if (wip->weapon_hitpoints <= 0.0f && (wip->wi_flags[Weapon::Info_Flags::No_radius_doubling])) {
@@ -4187,16 +4359,13 @@ void translate_spawn_types()
     {
         for (j = 0; j < Weapon_info[i].num_spawn_weapons_defined; j++)
         {
-            if ( (Weapon_info[i].spawn_info[j].spawn_wep_index > -1) && (Weapon_info[i].spawn_info[j].spawn_wep_index < Num_spawn_types) )
+            int spawn_type = Weapon_info[i].spawn_info[j].spawn_wep_index;
+            if ( Spawn_names.in_bounds(spawn_type) )
             {
-                int	spawn_type = Weapon_info[i].spawn_info[j].spawn_wep_index;
-
-                Assert( spawn_type < Num_spawn_types );
-
 				bool found_a_match = false;
                 for (k = 0; k < weapon_info_size(); k++)
                 {
-                    if ( !stricmp(Spawn_names[spawn_type], Weapon_info[k].name) ) 
+                    if ( !stricmp(Spawn_names[spawn_type].c_str(), Weapon_info[k].name) )
                     {
                         Weapon_info[i].spawn_info[j].spawn_wep_index = (short)k;
 
@@ -4209,7 +4378,7 @@ void translate_spawn_types()
                 }
 
 				if (!found_a_match) {
-					Warning(LOCATION, "Couldn't find spawn weapon %s for Weapon %s.\n", Spawn_names[spawn_type], Weapon_info[i].name);
+					Warning(LOCATION, "Couldn't find spawn weapon %s for Weapon %s.\n", Spawn_names[spawn_type].c_str(), Weapon_info[i].name);
 					Weapon_info[i].spawn_info[j].spawn_wep_index = -1;
 				}
             }
@@ -4940,13 +5109,48 @@ void weapon_do_post_parse()
 	translate_spawn_types();
 }
 
+// Called after ship_init() to resolve proximity ship type/class names into indices.
+void weapon_post_ship_init()
+{
+	const int num_weapons = static_cast<int>(Weapon_info.size());
+
+	for (const auto& entry : Pending_proximity_type_names) {
+		const int wi_index = entry.first;
+		Assertion(wi_index >= 0 && wi_index < num_weapons, "Pending proximity type entry has out-of-range weapon_info index %d (num_weapons=%d).", wi_index, num_weapons);
+		weapon_info& wip = Weapon_info[wi_index];
+		for (const SCP_string& type_name : entry.second) {
+			int idx = ship_type_name_lookup(type_name.c_str());
+			if (idx < 0)
+				Warning(LOCATION, "Weapon '%s': +Proximity Type entry '%s' not found.\n", wip.name, type_name.c_str());
+			else
+				wip.proximity_type.push_back(idx);
+		}
+	}
+
+	for (const auto& entry : Pending_proximity_class_names) {
+		const int wi_index = entry.first;
+		Assertion(wi_index >= 0 && wi_index < num_weapons, "Pending proximity class entry has out-of-range weapon_info index %d (num_weapons=%d).", wi_index, num_weapons);
+		weapon_info& wip = Weapon_info[wi_index];
+		for (const SCP_string& class_name : entry.second) {
+			int idx = ship_info_lookup(class_name.c_str());
+			if (idx < 0)
+				Warning(LOCATION, "Weapon '%s': +Proximity Class entry '%s' not found.\n", wip.name, class_name.c_str());
+			else
+				wip.proximity_class.push_back(idx);
+		}
+	}
+
+	Pending_proximity_type_names.clear();
+	Pending_proximity_class_names.clear();
+}
+
 /**
  * This will get called once at game startup
  */
 void weapon_init()
 {
 	if ( !Weapons_inited ) {
-		Num_spawn_types = 0;
+		Spawn_names.clear();
 
 		// parse weapons.tbl
 		Removed_weapons.clear();
@@ -4987,17 +5191,7 @@ void weapon_close()
 		used_weapons = NULL;
 	}
 
-	if (Spawn_names != NULL) {
-		for (i=0; i<Num_spawn_types; i++) {
-			if (Spawn_names[i] != NULL) {
-				vm_free(Spawn_names[i]);
-				Spawn_names[i] = NULL;
-			}
-		}
-
-		vm_free(Spawn_names);
-		Spawn_names = NULL;
-	}
+	Spawn_names.clear();
 }
 
 /**
@@ -5030,7 +5224,8 @@ void weapon_level_init()
 					case LockRestrictionType::CLASS: idx = ship_info_lookup(name); break;
 					case LockRestrictionType::SPECIES: idx = species_info_lookup(name); break;
 					case LockRestrictionType::IFF: idx = iff_lookup(name); break;
-					default: Assertion(false, "Unknown multi lock restriction type %d", (int)pair.first);
+					default:
+						UNREACHABLE("Unknown multi lock restriction type %d", static_cast<int>(pair.first));
 						idx = -1;
 				}
 				if ( idx >= 0 ) {
@@ -5110,8 +5305,10 @@ void weapon_delete(object *obj)
 	if (wp->hud_in_flight_snd_sig.isValid() && snd_is_playing(wp->hud_in_flight_snd_sig))
 		snd_stop(wp->hud_in_flight_snd_sig);
 
-	if (wp->model_instance_num >= 0)
+	if (wp->model_instance_num >= 0) {
 		model_delete_instance(wp->model_instance_num);
+		wp->model_instance_num = -1;
+	}
 
 	if (wp->cmeasure_ignore_list != nullptr) {
 		delete wp->cmeasure_ignore_list;
@@ -5285,7 +5482,7 @@ void find_homing_object(object *weapon_objp, int num)
                 else if (objp->type == OBJ_WEAPON)
 				{
                     //don't attempt to home on weapons if the weapon is a huge weapon or is a javelin homing weapon.
-                    if (wip->wi_flags[Weapon::Info_Flags::Huge, Weapon::Info_Flags::Homing_javelin])
+					if (wip->wi_flags.any_of(Weapon::Info_Flags::Huge,Weapon::Info_Flags::Homing_javelin))
                         continue;
                     
                     //don't look for local ssms that are gone for the time being
@@ -5608,8 +5805,21 @@ void weapon_home(object *obj, int num, float frame_time)
 	if (wp->homing_subsys != NULL) {
 		if (wp->homing_subsys->flags[Ship::Subsystem_Flags::Missiles_ignore_if_dead]) {
 			if ((wp->homing_subsys->max_hits > 0) && (wp->homing_subsys->current_hits <= 0)) {
-				wp->homing_object = &obj_used_list;
-				return;
+				if (The_mission.ai_profile->flags[AI::Profile_Flags::Fix_ignore_if_dead_flag]) {
+					// fixed way: clear dead subsys so the missile picks a hull attack point 
+					// or, for Javelins, re-acquire another engine
+					wp->homing_subsys = nullptr;
+					if (wip->wi_flags[Weapon::Info_Flags::Homing_javelin] && hobjp->type == OBJ_SHIP) {
+						int sindex = ship_get_by_signature(wp->target_sig);
+						if (sindex >= 0) {
+							wp->homing_subsys = ship_get_closest_subsys_in_sight(&Ships[sindex], SUBSYSTEM_ENGINE, &obj->pos);
+						}
+					}
+				} else {
+					// old way: resulted in weapon not homing
+					wp->homing_object = &obj_used_list;
+					return;
+				}
 			}
 		}
 	}
@@ -6069,6 +6279,177 @@ void weapon_process_pre( object *obj, float  frame_time)
 		}
 	}
 
+	// Mine chase/cooldown lifecycle: handle every frame for any mine, independent of proximity_radius
+	// (which can theoretically be cleared at runtime). The proximity scan itself is gated on
+	// proximity_radius > 0 below, so future non-mine weapons can opt into proximity detonation
+	// without inheriting the mine-specific chase state machine.
+	if (wip->is_mine()) {
+		// Chase timeout: check whether an active chase has expired
+		if (wp->mine_chase_expires.isFinite() && timestamp_elapsed(wp->mine_chase_expires)) {
+			if (wip->mine_detonates_on_chase_timeout) {
+				weapon_detonate(obj);
+				return;
+			}
+			// Give up: return to stationary at current position. State restored to "pre-chase"
+			// so the mine reappears on radar/sensors and is targetable as before.
+			// TODO: rather than insta-stopping, dampen velocity to a halt over a few frames for a smoother look.
+			vm_vec_zero(&obj->phys_info.vel);
+			vm_vec_zero(&obj->phys_info.desired_vel);
+			obj->phys_info.speed = 0.0f;
+			wp->weapon_max_vel = 0.0f;
+			wp->homing_object = &obj_used_list;
+			wp->target_num    = -1;
+			wp->target_sig    = -1;
+			wp->mine_chase_expires = TIMESTAMP::invalid();
+			if (wip->mine_chase_cooldown > 0.0f)
+				wp->mine_chase_cooldown_expires = _timestamp(fl2i(wip->mine_chase_cooldown * 1000.0f));
+			else
+				wp->mine_chase_cooldown_expires = TIMESTAMP::invalid();
+		}
+
+		// Cooldown lapsed - clear it so the field stays clean
+		if (wp->mine_chase_cooldown_expires.isFinite() && timestamp_elapsed(wp->mine_chase_cooldown_expires))
+			wp->mine_chase_cooldown_expires = TIMESTAMP::invalid();
+	}
+
+	// Proximity detonation: scan nearby ships and detonate if a qualifying one is within range.
+	// Gated on proximity_radius (not is_mine()) so future non-mine weapon types can use this path.
+	if (wip->proximity_radius > 0.0f) {
+		// Skip if mine is actively chasing
+		bool chasing = wp->mine_chase_expires.isFinite() && !timestamp_elapsed(wp->mine_chase_expires);
+		bool cooling_down = wp->mine_chase_cooldown_expires.isFinite();
+
+		// Arming gate: reuse the standard $Arm time: field - a proximity weapon won't trigger
+		// until this many fix-seconds after creation. weapon_armed() also enforces this for
+		// direct collisions; checking here additionally suppresses proximity triggers.
+		bool armed = !chasing && !cooling_down && (Missiontime - wp->creation_time) >= wip->arm_time;
+
+		// Roll detonate chance once per ~62ms time bucket (Missiontime >> 12)
+		// Within a bucket the result is sticky across frames and across all candidate ships.
+		// Deterministic in multiplayer because Missiontime is lockstep-synced; the multiplicative
+		// hash gives per-weapon variation that XOR alone couldn't (net_signature is 16-bit).
+		bool roll_passed = true;
+		if (armed && wip->proximity_detonate_chance < 1.0f) {
+			uint32_t roll_seed = (obj->net_signature * 2654435761u) ^ static_cast<uint32_t>(Missiontime >> 12);
+			roll_passed = (static_randf(static_cast<int>(roll_seed & 0x7FFFFFFFu)) < wip->proximity_detonate_chance);
+		}
+
+		if (armed && roll_passed) {
+			float base_prox = wip->proximity_radius;
+
+			for (const auto *sop : list_range(&Ship_obj_list)) {
+				object *check_obj = &Objects[sop->objnum];
+				if (check_obj->flags[Object::Object_Flags::Should_be_dead])
+					continue;
+
+				const ship *sp = &Ships[check_obj->instance];
+
+				// Dying or departing ships are no longer valid proximity targets
+				if (sp->flags[Ship::Ship_Flags::Dying]
+					|| sp->flags[Ship::Ship_Flags::Depart_warp])
+					continue;
+
+				// Protected ships are immune to mine proximity detonation
+				if (check_obj->flags[Object::Object_Flags::Protected])
+					continue;
+
+				// Stealth ships may have a reduced proximity trigger radius
+				float effective_prox = base_prox;
+				if (wip->proximity_stealth_multiplier < 1.0f &&
+				    sp->flags[Ship::Ship_Flags::Stealth]) {
+					effective_prox *= wip->proximity_stealth_multiplier;
+				}
+
+				// Distance check (cheap rejection)
+				if (vm_vec_dist_squared(&obj->pos, &check_obj->pos) > effective_prox * effective_prox)
+					continue;
+
+				// Apply filters: AND across categories, OR within each category. Empty category = pass all.
+				const ship_info* sip = &Ship_info[sp->ship_info_index];
+
+				if (!wip->proximity_iff.empty()) {
+					bool matched = false;
+					for (int iff_idx : wip->proximity_iff) {
+						if (sp->team == iff_idx) { matched = true; break; }
+					}
+					if (!matched) continue;
+				}
+
+				if (!wip->proximity_species.empty()) {
+					bool matched = false;
+					for (int spec_idx : wip->proximity_species) {
+						if (sip->species == spec_idx) { matched = true; break; }
+					}
+					if (!matched) continue;
+				}
+
+				if (!wip->proximity_type.empty()) {
+					bool matched = false;
+					for (int type_idx : wip->proximity_type) {
+						if (sip->class_type == type_idx) { matched = true; break; }
+					}
+					if (!matched) continue;
+				}
+
+				if (!wip->proximity_class.empty()) {
+					bool matched = false;
+					for (int class_idx : wip->proximity_class) {
+						if (sp->ship_info_index == class_idx) { matched = true; break; }
+					}
+					if (!matched) continue;
+				}
+
+				// Launcher-relative relation filter. Categories are mutually exclusive and exhaustive:
+				// friendly = same team; hostile = launcher attacks target; neutral = everything else.
+				if (wip->proximity_relation_mask != 0) {
+					bool is_friendly = (wp->team == sp->team);
+					bool is_hostile  = !is_friendly && iff_x_attacks_y(wp->team, sp->team);
+					bool is_neutral  = !is_friendly && !is_hostile;
+					bool matched =
+						((wip->proximity_relation_mask & Weapon::Proximity::Relation_Hostile)  && is_hostile) ||
+						((wip->proximity_relation_mask & Weapon::Proximity::Relation_Friendly) && is_friendly) ||
+						((wip->proximity_relation_mask & Weapon::Proximity::Relation_Neutral)  && is_neutral);
+					if (!matched) continue;
+				}
+
+				// A ship passed all proximity checks. Fire the overridable trigger hook before the weapon reacts
+				if (scripting::hooks::OnWeaponProximityTriggered->isActive()) {
+					auto proxParamList = scripting::hook_param_list(
+						scripting::hook_param("Weapon",   'o', obj),
+						scripting::hook_param("Ship",     'o', check_obj),
+						scripting::hook_param("Position", 'o', scripting::api::l_Vector.Set(obj->pos))
+					);
+					scripting::hooks::WeaponProximityTriggeredConditions proxConds{ wp, sp };
+					bool overridden = scripting::hooks::OnWeaponProximityTriggered->isOverride(proxConds, proxParamList);
+					scripting::hooks::OnWeaponProximityTriggered->run(proxConds, proxParamList);
+					if (overridden)
+						return;
+				}
+
+				// Set the triggering ship as the homing object and target. Both fields
+				// must be set: homing_object is used by weapon_has_homing_object(),
+				// and target_num is what weapon_set_tracking_info() actually receives.
+				wp->homing_object = check_obj;
+				wp->target_num    = OBJ_INDEX(check_obj);
+
+				if (wip->mine_chase_duration > 0.0f) {
+					// Chase mode: become a guided missile for the configured duration.
+					// Contact with the ship (handled by normal weapon collision) causes detonation.
+					// NOTE: chase reuses the existing homing-missile movement code, so the weapon must
+					// have a homing flag (Homing_aspect/Homing_heat/Homing_javelin) set in its table for
+					// it to actually move. A mine with mine_chase_duration > 0 but no homing flag will
+					// sit still until the chase timer expires - by design.
+					wp->mine_chase_expires = _timestamp(fl2i(wip->mine_chase_duration * 1000.0f));
+					wp->weapon_max_vel = wip->max_speed;
+				} else {
+					// Immediate detonation mode.
+					weapon_detonate(obj);
+				}
+				return;
+			}
+		}
+	}
+
 	// If this flag is false missile turning is evaluated in weapon_process_post()
 	if (Framerate_independent_turning) {
 		weapon_do_homing_behavior(obj, frame_time);
@@ -6232,9 +6613,12 @@ void weapon_process_post(object * obj, float frame_time)
 
 	wp = &Weapons[num];
 
-	wp->lifeleft -= frame_time;
-
 	wip = &Weapon_info[wp->weapon_info_index];
+
+	// Mines have infinite lifetime - skip the countdown
+	if (!wip->is_mine()) {
+		wp->lifeleft -= frame_time;
+	}
 
 	// do continuous spawns
 	if (wip->wi_flags[Weapon::Info_Flags::Spawn]) {
@@ -6298,7 +6682,7 @@ void weapon_process_post(object * obj, float frame_time)
 	}
 
 	// plot homing missiles on the radar
-	if (((wip->wi_flags[Weapon::Info_Flags::Bomb]) || (wip->wi_flags[Weapon::Info_Flags::Shown_on_radar])) && !(wip->wi_flags[Weapon::Info_Flags::Dont_show_on_radar])) {
+	if (((wip->wi_flags[Weapon::Info_Flags::Bomb]) || wip->is_mine() || (wip->wi_flags[Weapon::Info_Flags::Shown_on_radar])) && !(wip->wi_flags[Weapon::Info_Flags::Dont_show_on_radar])) {
 		if ( hud_gauge_active(HUD_RADAR) ) {
 			radar_plot_object( obj );
 		}
@@ -6658,31 +7042,69 @@ void weapon_set_tracking_info(int weapon_objnum, int parent_objnum, int target_o
 	}
 }
 
-size_t* get_pointer_to_weapon_fire_pattern_index(int weapon_type, int ship_idx, ship_subsys * src_turret)
+static size_t *get_pointer_to_weapon_fire_pattern_index(ship_weapon *ship_weapon_p, int swp_pbank, int swp_sbank)
 {
-	Assertion(ship_idx >= 0 && ship_idx < MAX_SHIPS, "Invalid ship index in get_pointer_to_weapon_fire_pattern_index()");
-	ship* shipp = &Ships[ship_idx];
-	ship_weapon* ship_weapon_p = &(shipp->weapons);
-	if(src_turret)
+	if (ship_weapon_p)
 	{
-		ship_weapon_p = &src_turret->weapons;
+		if (swp_pbank >= 0)
+		{
+			Assertion(swp_pbank < MAX_SHIP_PRIMARY_BANKS, "swp_pbank is %d, which is out of range [0,%d)", swp_pbank, MAX_SHIP_PRIMARY_BANKS);
+			return &(ship_weapon_p->primary_bank_substitution_pattern_index[swp_pbank]);
+		}
+		if (swp_sbank >= 0)
+		{
+			Assertion(swp_sbank < MAX_SHIP_SECONDARY_BANKS, "swp_sbank is %d, which is out of range [0,%d)", swp_sbank, MAX_SHIP_SECONDARY_BANKS);
+			return &(ship_weapon_p->secondary_bank_substitution_pattern_index[swp_sbank]);
+		}
 	}
-	Assert( ship_weapon_p != NULL );
+	return nullptr;
+}
 
-	// search for the corresponding bank pattern index for the weapon_type that is being fired.
-	// Note: Because a weapon_type may not be unique to a weapon bank per ship this search may attribute
-	// the weapon to the wrong bank.  Hopefully this isn't a problem.
-	for ( int pi = 0; pi < MAX_SHIP_PRIMARY_BANKS; pi++ ) {
-		if ( ship_weapon_p->primary_bank_weapons[pi] == weapon_type ) {
-			return &(ship_weapon_p->primary_bank_substitution_pattern_index[pi]);
+// gets the substitution pattern pointer for a given weapon
+// returns [use_substitution, substituted_weapon_info_index]
+std::tuple<bool, int> get_weapon_substitution_tuple(int weapon_info_index, ship_weapon *swp, int pbank, int sbank, ship *shipp_to_check)
+{
+	auto wip = &Weapon_info[weapon_info_index];
+	if (wip->num_substitution_patterns == 0)
+		return { false, -1 };
+
+	bool paired_shot = false;
+	if (shipp_to_check)
+	{
+		// only advance the pattern once per linked/paired shot rather than once per projectile
+		if (wip->subtype == WP_LASER)
+		{
+			paired_shot = shipp_to_check->flags[Ship::Ship_Flags::Primary_linked];
+		}
+		else if (wip->subtype == WP_MISSILE && shipp_to_check->flags[Ship::Ship_Flags::Secondary_dual_fire])
+		{
+			// for dual fire, also check whether the armed bank can actually use it, since the flag is ignored rather than cleared for banks that can't
+			paired_shot = ship_secondary_bank_can_dual_fire(shipp_to_check, sbank);
 		}
 	}
-	for ( int si = 0; si < MAX_SHIP_SECONDARY_BANKS; si++ ) {
-		if ( ship_weapon_p->secondary_bank_weapons[si] == weapon_type ) {
-			return &(ship_weapon_p->secondary_bank_substitution_pattern_index[si]);
+
+	auto position = get_pointer_to_weapon_fire_pattern_index(swp, pbank, sbank);
+	if (position)
+	{
+		size_t curr_pos = *position;
+		if (paired_shot && curr_pos > 0)
+			curr_pos--;
+		++(*position);
+		*position = (*position) % wip->num_substitution_patterns;
+
+		if (wip->weapon_substitution_pattern[curr_pos] == -1)
+		{
+			// weapon doesn't want any sub
+			return { true, -1 };
+		}
+		else if (wip->weapon_substitution_pattern[curr_pos] != weapon_info_index)
+		{
+			// weapon wants to sub with weapon other than me
+			return { true, wip->weapon_substitution_pattern[curr_pos] };
 		}
 	}
-	return NULL;
+
+	return { false, -1 };
 }
 
 /**
@@ -6691,7 +7113,7 @@ size_t* get_pointer_to_weapon_fire_pattern_index(int weapon_type, int ship_idx, 
  * @return Index of weapon in the Objects[] array, -1 if the weapon object was not created
  */
 int Weapons_created = 0;
-int weapon_create( const vec3d *pos, const matrix *porient, int weapon_type, int parent_objnum, int group_id, bool is_locked, bool is_spawned, float fof_cooldown, ship_subsys *src_turret, const WeaponLaunchCurveData& launch_curve_data )
+int weapon_create( const vec3d *pos, const matrix *porient, int weapon_type, int parent_objnum, int group_id, bool is_locked, bool is_spawned, ship_weapon *src_swp, int src_pbank, int src_sbank, const WeaponLaunchCurveData& launch_curve_data )
 {
 	int			n, objnum;
 	object		*objp, *parent_objp=NULL;
@@ -6716,32 +7138,17 @@ int weapon_create( const vec3d *pos, const matrix *porient, int weapon_type, int
 
 	if ( (wip->num_substitution_patterns > 0) && (parent_objp != NULL)) {
 		// using substitution
+		// linked/dual fire pairing only applies to ship-level fire, not to turrets or non-ship parents
+		ship *parent_shipp = nullptr;
+		if (parent_objp->type == OBJ_SHIP && src_swp == &Ships[parent_objp->instance].weapons)
+			parent_shipp = &Ships[parent_objp->instance];
+		auto [use_substitution, substituted_weapon_info_index] = get_weapon_substitution_tuple(weapon_type, src_swp, src_pbank, src_sbank, parent_shipp);
 
-		// get to the instance of the gun
-		Assertion( parent_objp->type == OBJ_SHIP, "Expected type OBJ_SHIP, got %d", parent_objp->type );
-		Assertion( (parent_objp->instance < MAX_SHIPS) && (parent_objp->instance >= 0),
-			"Ship index is %d, which is out of range [%d,%d)", parent_objp->instance, 0, MAX_SHIPS);
-		ship* parent_shipp = &(Ships[parent_objp->instance]);
-		Assert( parent_shipp != NULL );
+		if (use_substitution) {
+			if (substituted_weapon_info_index < 0)
+				return -1;
 
-		size_t *position = get_pointer_to_weapon_fire_pattern_index(weapon_type, parent_objp->instance, src_turret);
-		Assertion( position != NULL, "'%s' is trying to fire a weapon that is not selected", Ships[parent_objp->instance].ship_name );
-
-		size_t curr_pos = *position;
-		if (((Weapon_info[weapon_type].subtype == WP_LASER && parent_shipp->flags[Ship::Ship_Flags::Primary_linked]) ||
-			 (Weapon_info[weapon_type].subtype == WP_MISSILE && parent_shipp->flags[Ship::Ship_Flags::Secondary_dual_fire])) &&
-			 (curr_pos > 0)) {
-			curr_pos--;
-		}
-		++(*position);
-		*position = (*position) % wip->num_substitution_patterns;
-
-		if ( wip->weapon_substitution_pattern[curr_pos] == -1 ) {
-			// weapon doesn't want any sub
-			return -1;
-		} else if ( wip->weapon_substitution_pattern[curr_pos] != weapon_type ) {
-			// weapon wants to sub with weapon other than me
-			return weapon_create(pos, porient, wip->weapon_substitution_pattern[curr_pos], parent_objnum, group_id, is_locked, is_spawned, fof_cooldown, nullptr, launch_curve_data);
+			return weapon_create(pos, porient, substituted_weapon_info_index, parent_objnum, group_id, is_locked, is_spawned, src_swp, src_pbank, src_sbank, launch_curve_data);
 		}
 	}
 
@@ -6753,7 +7160,7 @@ int weapon_create( const vec3d *pos, const matrix *porient, int weapon_type, int
 		float test = rng.next();
 		if (test < failure_rate) {
 			if (wip->failure_sub != -1) {
-				return weapon_create(pos, porient, wip->failure_sub, parent_objnum, group_id, is_locked, is_spawned, fof_cooldown, nullptr, launch_curve_data);
+				return weapon_create(pos, porient, wip->failure_sub, parent_objnum, group_id, is_locked, is_spawned, src_swp, src_pbank, src_sbank, launch_curve_data);
 			} else {
 				return -1;
 			}
@@ -6806,9 +7213,15 @@ int weapon_create( const vec3d *pos, const matrix *porient, int weapon_type, int
 	orient = &morient;
 
 	float combined_fof = wip->field_of_fire * wip->weapon_launch_curves.get_output(weapon_info::WeaponLaunchCurveOutputs::FOF_MULT, launch_curve_data);
-	// If there is a fof_cooldown value, increase the spread linearly
-	if (fof_cooldown != 0.0f) {
-		combined_fof = wip->field_of_fire + (fof_cooldown * wip->max_fof_spread);
+	{
+		// If there is a fof_cooldown value, increase the spread linearly
+		float fof_cooldown = 0.0f;
+		if (src_swp && src_pbank >= 0)
+			fof_cooldown = src_swp->primary_bank_fof_cooldown[src_pbank];
+//		if (src_swp && src_sbank >= 0)
+//			fof_cooldown = src_swp->secondary_bank_fof_cooldown[src_sbank];
+		if (fof_cooldown != 0.0f)
+			combined_fof = wip->field_of_fire + (fof_cooldown * wip->max_fof_spread);
 	}
 
 	if(combined_fof > 0.0f){
@@ -7041,6 +7454,15 @@ int weapon_create( const vec3d *pos, const matrix *porient, int weapon_type, int
 			wp->launch_speed += pspeed;
 	}
 
+	// Mines are stationary: zero all velocity after all other velocity setup
+	if (wip->is_mine()) {
+		vm_vec_zero(&objp->phys_info.vel);
+		vm_vec_zero(&objp->phys_info.desired_vel);
+		objp->phys_info.speed = 0.0f;
+		wp->weapon_max_vel = 0.0f;
+		wp->launch_speed = 0.0f;
+	}
+
 	// create the corkscrew
 	if ( wip->wi_flags[Weapon::Info_Flags::Corkscrew] ) {
 		wp->cscrew_index = (short)cscrew_create(objp);
@@ -7050,9 +7472,6 @@ int weapon_create( const vec3d *pos, const matrix *porient, int weapon_type, int
 
 	if (wip->wi_flags[Weapon::Info_Flags::Local_ssm])
 	{
-
-		Assert(parent_objp);		//local ssms must have a parent
-
 		wp->lssm_warpout_time=timestamp(wip->lssm_warpout_delay);
 		wp->lssm_warpin_time=timestamp(wip->lssm_warpout_delay + wip->lssm_warpin_delay);
 		wp->lssm_stage=1;
@@ -7112,6 +7531,9 @@ int weapon_create( const vec3d *pos, const matrix *porient, int weapon_type, int
 		}
 	}
 
+	wp->mine_chase_expires          = TIMESTAMP::invalid();
+	wp->mine_chase_cooldown_expires = TIMESTAMP::invalid();
+
 	//	Set detail levels for POF-type weapons.
 	if (Weapon_info[wp->weapon_info_index].model_num != -1) {
 		polymodel * pm;
@@ -7154,7 +7576,7 @@ int weapon_create( const vec3d *pos, const matrix *porient, int weapon_type, int
 
 	Num_weapons++;
 
-	if (Weapons_inherit_parent_collision_group) {
+	if (Weapons_inherit_parent_collision_group && parent_objnum >= 0) {
 		Objects[objnum].collision_group_id = Objects[parent_objnum].collision_group_id;
 	}
 
@@ -7194,7 +7616,7 @@ int weapon_create( const vec3d *pos, const matrix *porient, int weapon_type, int
 	}
 
 	if (scripting::hooks::OnWeaponCreated->isActive()) {
-		scripting::hooks::OnWeaponCreated->run(scripting::hooks::WeaponCreatedConditions{ wp, &Objects[parent_objnum] },
+		scripting::hooks::OnWeaponCreated->run(scripting::hooks::WeaponCreatedConditions{ wp, parent_objnum < 0 ? nullptr : &Objects[parent_objnum] },
 			scripting::hook_param_list(
 				scripting::hook_param("Weapon", 'o', &Objects[objnum])
 			));
@@ -7298,18 +7720,31 @@ void spawn_child_weapons(object *objp, int spawn_index_override)
 			matrix	orient;
 
 
-			// for multiplayer, use the static randvec functions based on the network signatures to provide
-			// the randomness so that it is the same on all machines.
-			if ( Game_mode & GM_MULTIPLAYER ) {
-				if (wip->spawn_info[i].spawn_min_angle <= 0)
-					static_rand_cone(objp->net_signature + j, &tvec, fvec, wip->spawn_info[i].spawn_angle);
-				else
-					static_rand_cone(objp->net_signature + j, &tvec, fvec, wip->spawn_info[i].spawn_min_angle, wip->spawn_info[i].spawn_angle);
+			// Compute spawn direction.
+			if (wip->spawn_info[i].spawn_aimed && wp != nullptr && weapon_has_homing_object(wp)) {
+				// Aimed spawn: point directly at the homing object with optional constant-velocity
+				// lead extrapolation.  wp != nullptr guard handles beam-spawned weapons (which have
+				// no weapon struct). They fall through to the random cone below.
+				// Direction is deterministic (derived from a known object position), so no
+				// static_rand seeding is needed for multiplayer consistency.
+				vec3d target_pos = wp->homing_object->pos;
+				if (wip->spawn_info[i].spawn_aim_lead > 0.0f)
+					vm_vec_scale_add2(&target_pos, &wp->homing_object->phys_info.vel, wip->spawn_info[i].spawn_aim_lead);
+				vm_vec_normalized_dir(&tvec, &target_pos, opos);
 			} else {
-				if(wip->spawn_info[i].spawn_min_angle <= 0)
-					vm_vec_random_cone(&tvec, fvec, wip->spawn_info[i].spawn_angle);
-				else
-					vm_vec_random_cone(&tvec, fvec, wip->spawn_info[i].spawn_min_angle, wip->spawn_info[i].spawn_angle);
+				// Standard random cone: for multiplayer, use static randvec functions keyed on
+				// network signatures so all machines produce the same spread.
+				if (Game_mode & GM_MULTIPLAYER) {
+					if (wip->spawn_info[i].spawn_min_angle <= 0)
+						static_rand_cone(objp->net_signature + j, &tvec, fvec, wip->spawn_info[i].spawn_angle);
+					else
+						static_rand_cone(objp->net_signature + j, &tvec, fvec, wip->spawn_info[i].spawn_min_angle, wip->spawn_info[i].spawn_angle);
+				} else {
+					if (wip->spawn_info[i].spawn_min_angle <= 0)
+						vm_vec_random_cone(&tvec, fvec, wip->spawn_info[i].spawn_angle);
+					else
+						vm_vec_random_cone(&tvec, fvec, wip->spawn_info[i].spawn_min_angle, wip->spawn_info[i].spawn_angle);
+				}
 			}
 			vm_vec_scale_add(&pos, opos, &tvec, objp->radius);
 
@@ -8342,6 +8777,100 @@ void weapon_mark_as_used(int weapon_type)
 	}
 }
 
+/**
+ * Pages in the model(s) and, optionally, all graphics for a single weapon.
+ *
+ * @param wip           Pointer to the weapon_info to page in.
+ * @param load_graphics When true, page in all textures/bitmaps (POF texture maps, laser
+ *                      bitmaps, trail/beam/thruster/decal graphics).  When false only the
+ *                      model geometry is loaded; non-model graphics will load lazily on
+ *                      first render (used by weapons_page_in_cheats).
+ */
+static void weapon_page_in_one(weapon_info *wip, bool load_graphics)
+{
+	wip->wi_flags.remove(Weapon::Info_Flags::Thruster);		// Assume no thrusters
+
+	switch (wip->render_type)
+	{
+		case WRT_POF:
+		{
+			wip->model_num = model_load(wip->pofbitmap_name);
+			polymodel *pm = model_get(wip->model_num);
+
+			// If it has a model, and the model pof has thrusters, then set
+			// the flags
+			if (pm->n_thrusters > 0)
+				wip->wi_flags.set(Weapon::Info_Flags::Thruster);
+
+			if (load_graphics)
+				for (int j = 0; j < pm->n_textures; j++)
+					pm->maps[j].PageIn();
+
+			break;
+		}
+
+		case WRT_LASER:
+		{
+			if (load_graphics)
+			{
+				bm_page_in_texture(wip->laser_bitmap.first_frame);
+				bm_page_in_texture(wip->laser_glow_bitmap.first_frame);
+				bm_page_in_texture(wip->laser_headon_bitmap.first_frame);
+				bm_page_in_texture(wip->laser_glow_headon_bitmap.first_frame);
+			}
+
+			break;
+		}
+
+		case WRT_NONE:
+			break;
+
+		default:
+			UNREACHABLE("Weapon %s has an invalid rendering type %d", wip->name, wip->render_type);
+	}
+
+	wip->external_model_num = -1;
+
+	if (VALID_FNAME(wip->external_model_name))
+		wip->external_model_num = model_load(wip->external_model_name);
+
+	if (wip->external_model_num >= 0)
+	{
+		polymodel *external_pm = model_get(wip->external_model_num);
+
+		// only the first gun bank of an external model supplies firing points
+		if (external_pm->n_guns > 1)
+			Warning(LOCATION, "External model %s of weapon %s has %d gun banks; only the firing points of the first bank are used.", wip->external_model_name, wip->name, external_pm->n_guns);
+	}
+
+	//Load shockwaves
+	shockwave_create_info_load(&wip->shockwave);
+	shockwave_create_info_load(&wip->dinky_shockwave);
+
+	if (load_graphics)
+	{
+		// trail bitmaps
+		if ((wip->wi_flags[Weapon::Info_Flags::Trail]) && (wip->tr_info.texture.bitmap_id > -1))
+			bm_page_in_texture(wip->tr_info.texture.bitmap_id);
+
+		// if this is a beam weapon, page in its stuff
+		if (wip->wi_flags[Weapon::Info_Flags::Beam])
+		{
+			// all beam sections
+			for (int idx = 0; idx < wip->b_info.beam_num_sections; idx++)
+				bm_page_in_texture(wip->b_info.sections[idx].texture.first_frame);
+
+			// muzzle glow
+			bm_page_in_texture(wip->b_info.beam_glow.first_frame);
+		}
+
+		bm_page_in_texture(wip->thruster_flame.first_frame);
+		bm_page_in_texture(wip->thruster_glow.first_frame);
+
+		decals::pageInDecal(wip->impact_decal);
+	}
+}
+
 void weapons_page_in()
 {
 	TRACE_SCOPE(tracing::WeaponPageIn);
@@ -8352,8 +8881,8 @@ void weapons_page_in()
 
 	// for weapons in weaponry pool
 	for (i = 0; i < Num_teams; i++) {
-		for (j = 0; j < Team_data[i].num_weapon_choices; j++) {
-			used_weapons[Team_data[i].weaponry_pool[j]] += Team_data[i].weaponry_count[j];
+		for (auto &entry : Team_data[i].weapon_choices) {
+			used_weapons[entry.class_index] += entry.count;
 		}
 	}
 
@@ -8388,75 +8917,7 @@ void weapons_page_in()
 
 		weapon_load_bitmaps(i);
 
-		weapon_info *wip = &Weapon_info[i];
-
-        wip->wi_flags.remove(Weapon::Info_Flags::Thruster);		// Assume no thrusters
-		
-		switch (wip->render_type)
-		{
-			case WRT_POF:
-			{
-				wip->model_num = model_load( wip->pofbitmap_name );
-
-				polymodel *pm = model_get( wip->model_num );
-
-				// If it has a model, and the model pof has thrusters, then set
-				// the flags
-				if (pm->n_thrusters > 0) {
-                    wip->wi_flags.set(Weapon::Info_Flags::Thruster);
-				}
-		
-				for (j = 0; j < pm->n_textures; j++)
-					pm->maps[j].PageIn();
-
-				break;
-			}
-
-			case WRT_LASER:
-			{
-				bm_page_in_texture( wip->laser_bitmap.first_frame );
-				bm_page_in_texture( wip->laser_glow_bitmap.first_frame );
-				bm_page_in_texture (wip->laser_headon_bitmap.first_frame );
-				bm_page_in_texture (wip->laser_glow_headon_bitmap.first_frame);
-
-				break;
-			}
-
-			default:
-				Assertion(wip->render_type != WRT_POF && wip->render_type != WRT_LASER, "Weapon %s does not have a valid rendering type. Type passed: %d\n", wip->name, wip->render_type);	// Invalid weapon rendering type.
-		}
-
-		wip->external_model_num = -1;
-
-		if (VALID_FNAME(wip->external_model_name))
-			wip->external_model_num = model_load( wip->external_model_name );
-
-		if (wip->external_model_num == -1)
-			wip->external_model_num = wip->model_num;
-
-
-		//Load shockwaves
-		shockwave_create_info_load(&wip->shockwave);
-		shockwave_create_info_load(&wip->dinky_shockwave);
-
-		// trail bitmaps
-		if ( (wip->wi_flags[Weapon::Info_Flags::Trail]) && (wip->tr_info.texture.bitmap_id > -1) )
-			bm_page_in_texture( wip->tr_info.texture.bitmap_id );
-
-		// if this is a beam weapon, page in its stuff
-		if (wip->wi_flags[Weapon::Info_Flags::Beam]) {
-			// all beam sections
-			for (idx = 0; idx < wip->b_info.beam_num_sections; idx++)
-				bm_page_in_texture(wip->b_info.sections[idx].texture.first_frame);
-
-			// muzzle glow
-			bm_page_in_texture(wip->b_info.beam_glow.first_frame);
-		}
-
-		bm_page_in_texture(wip->thruster_flame.first_frame);
-		bm_page_in_texture(wip->thruster_glow.first_frame);
-
-		decals::pageInDecal(wip->impact_decal);
+		weapon_page_in_one(&Weapon_info[i], true);
 	}
 }
 
@@ -8485,34 +8946,7 @@ void weapons_page_in_cheats()
 
 		weapon_load_bitmaps(i);
 
-		weapon_info *wip = &Weapon_info[i];
-		
-        wip->wi_flags.remove(Weapon::Info_Flags::Thruster);		// Assume no thrusters
-
-		if ( wip->render_type == WRT_POF ) {
-			wip->model_num = model_load( wip->pofbitmap_name );
-				
-			polymodel *pm = model_get( wip->model_num );
-				
-			// If it has a model, and the model pof has thrusters, then set
-			// the flags
-			if ( pm->n_thrusters > 0 )	{
-                wip->wi_flags.set(Weapon::Info_Flags::Thruster);
-			}
-		}
-		
-		wip->external_model_num = -1;
-		
-		if (VALID_FNAME(wip->external_model_name))
-			wip->external_model_num = model_load( wip->external_model_name );
-
-		if (wip->external_model_num == -1)
-			wip->external_model_num = wip->model_num;
-		
-		
-		//Load shockwaves
-		shockwave_create_info_load(&wip->shockwave);
-		shockwave_create_info_load(&wip->dinky_shockwave);
+		weapon_page_in_one(&Weapon_info[i], false);
 
 		used_weapons[i]++;
 	}
@@ -8561,76 +8995,7 @@ bool weapon_page_in(int weapon_type)
 		// Page in bitmaps for the weapon
 		weapon_load_bitmaps(page_in_weapons.at(k));
 
-		weapon_info *wip = &Weapon_info[page_in_weapons.at(k)];
-
-		wip->wi_flags.remove(Weapon::Info_Flags::Thruster);		// Assume no thrusters
-
-		switch (wip->render_type)
-		{
-		case WRT_POF:
-		{
-			wip->model_num = model_load(wip->pofbitmap_name);
-
-			polymodel *pm = model_get(wip->model_num);
-
-			// If it has a model, and the model pof has thrusters, then set
-			// the flags
-			if (pm->n_thrusters > 0) {
-				wip->wi_flags.set(Weapon::Info_Flags::Thruster);
-			}
-
-			for (int j = 0; j < pm->n_textures; j++)
-				pm->maps[j].PageIn();
-
-			break;
-		}
-
-		case WRT_LASER:
-		{
-			bm_page_in_texture(wip->laser_bitmap.first_frame);
-			bm_page_in_texture(wip->laser_glow_bitmap.first_frame);
-			bm_page_in_texture(wip->laser_headon_bitmap.first_frame);
-			bm_page_in_texture(wip->laser_glow_headon_bitmap.first_frame);
-
-			break;
-		}
-
-		default:
-			Assertion(wip->render_type != WRT_POF && wip->render_type != WRT_LASER, "Weapon %s does not have a valid rendering type. Type passed: %d\n", wip->name, wip->render_type);	// Invalid weapon rendering type.
-		}
-
-		wip->external_model_num = -1;
-
-		if (VALID_FNAME(wip->external_model_name))
-			wip->external_model_num = model_load(wip->external_model_name);
-
-		if (wip->external_model_num == -1)
-			wip->external_model_num = wip->model_num;
-
-
-		//Load shockwaves
-		shockwave_create_info_load(&wip->shockwave);
-		shockwave_create_info_load(&wip->dinky_shockwave);
-
-		// trail bitmaps
-		if ((wip->wi_flags[Weapon::Info_Flags::Trail]) && (wip->tr_info.texture.bitmap_id > -1))
-			bm_page_in_texture(wip->tr_info.texture.bitmap_id);
-
-		// if this is a beam weapon, page in its stuff
-		if (wip->wi_flags[Weapon::Info_Flags::Beam]) {
-			// all beam sections
-			for (int idx = 0; idx < wip->b_info.beam_num_sections; idx++)
-				bm_page_in_texture(wip->b_info.sections[idx].texture.first_frame);
-
-			// muzzle glow
-			bm_page_in_texture(wip->b_info.beam_glow.first_frame);
-		}
-
-		bm_page_in_texture(wip->thruster_flame.first_frame);
-		bm_page_in_texture(wip->thruster_glow.first_frame);
-
-		// Page in decal bitmaps
-		decals::pageInDecal(wip->impact_decal);
+		weapon_page_in_one(&Weapon_info[page_in_weapons.at(k)], true);
 
 		used_weapons[page_in_weapons.at(k)]++;	// Ensures weapon can be counted as used
 	}
@@ -9473,6 +9838,19 @@ void weapon_info::reset()
 	this->arm_radius = 0.0f;
 	this->det_range = 0.0f;
 	this->det_radius = 0.0f;
+	this->proximity_radius = 0.0f;
+	this->proximity_iff.clear();
+	this->proximity_species.clear();
+	this->proximity_type.clear();
+	this->proximity_class.clear();
+	this->proximity_relation_mask = 0;
+	this->proximity_detonate_chance = 1.0f;
+	this->proximity_stealth_multiplier = 1.0f;
+	this->mine_sensors_range = -1.0f;
+	this->mine_targetable_range = -1.0f;
+	this->mine_chase_duration = 0.0f;
+	this->mine_detonates_on_chase_timeout = true;
+	this->mine_chase_cooldown = 5.0f;
 
 	this->flak_detonation_accuracy = 65.0f;
 	this->flak_targeting_accuracy = 60.0f; // Standard value as defined in flak.cpp
@@ -9495,6 +9873,7 @@ void weapon_info::reset()
 	this->cargo_size = 1.0f;
 	this->autoaim_fov = 0.0f;
 	this->rearm_rate = 1.0f;
+	this->disallow_rearm = false;
 	this->reloaded_per_batch = -1;
 	this->weapon_range = WEAPON_DEFAULT_TABLED_MAX_RANGE;
 	// *Minimum weapon range, default is 0 -Et1
@@ -9519,6 +9898,8 @@ void weapon_info::reset()
 		this->spawn_info[i].spawn_interval = -1.f;
 		this->spawn_info[i].spawn_interval_delay = -1.f;
 		this->spawn_info[i].spawn_chance = 1.f;
+		this->spawn_info[i].spawn_aimed = false;
+		this->spawn_info[i].spawn_aim_lead = 0.0f;
 	}
 
 	this->lifetime_variation_factor_when_child = 0.2f;
@@ -9778,6 +10159,336 @@ void weapon_info::reset()
 	this->on_create_program = actions::ProgramSet();
 }
 
+void weapon_info::clone(const weapon_info& other)
+{
+	strcpy_s(name, other.name);
+	display_name = other.display_name;
+	strcpy_s(title, other.title);
+	CLONE_UNIQUE_PTR(desc);
+	strcpy_s(altSubsysName, other.altSubsysName);
+
+	strcpy_s(pofbitmap_name, other.pofbitmap_name);
+	model_num = other.model_num;
+	strcpy_s(external_model_name, other.external_model_name);
+	external_model_num = other.external_model_num;
+
+	CLONE_UNIQUE_PTR(tech_desc);
+	strcpy_s(tech_anim_filename, other.tech_anim_filename);
+	strcpy_s(tech_title, other.tech_title);
+	strcpy_s(tech_model, other.tech_model);
+
+	hud_target_lod = other.hud_target_lod;
+	num_detail_levels = other.num_detail_levels;
+	memcpy(detail_distance, other.detail_distance, sizeof(detail_distance));
+	subtype = other.subtype;
+	render_type = other.render_type;
+
+	closeup_pos = other.closeup_pos;
+	closeup_zoom = other.closeup_zoom;
+	icon_closeup_pos = other.icon_closeup_pos;
+	icon_closeup_zoom = other.icon_closeup_zoom;
+
+	strcpy_s(hud_filename, other.hud_filename);
+	hud_image_index = other.hud_image_index;
+
+	laser_bitmap = other.laser_bitmap;
+	laser_headon_bitmap = other.laser_headon_bitmap;
+	laser_glow_bitmap = other.laser_glow_bitmap;
+	laser_glow_headon_bitmap = other.laser_glow_headon_bitmap;
+	laser_headon_switch_rate = other.laser_headon_switch_rate;
+	laser_headon_switch_ang = other.laser_headon_switch_ang;
+
+	laser_length = other.laser_length;
+	laser_length_by_frametime = other.laser_length_by_frametime;
+	bitmap_color = other.bitmap_color;
+	laser_color_1 = other.laser_color_1;
+	laser_color_2 = other.laser_color_2;
+	laser_head_radius = other.laser_head_radius;
+	laser_tail_radius = other.laser_tail_radius;
+	laser_glow_length_scale = other.laser_glow_length_scale;
+	laser_glow_head_scale = other.laser_glow_head_scale;
+	laser_glow_tail_scale = other.laser_glow_tail_scale;
+	laser_min_pixel_size = other.laser_min_pixel_size;
+	laser_pos_offset = other.laser_pos_offset;
+
+	collision_radius_override = other.collision_radius_override;
+
+	light_color_set = other.light_color_set;
+	light_color = other.light_color;
+	light_radius = other.light_radius;
+
+	max_speed = other.max_speed;
+	acceleration_time = other.acceleration_time;
+	vel_inherit_amount = other.vel_inherit_amount;
+	free_flight_time = other.free_flight_time;
+	free_flight_speed_factor = other.free_flight_speed_factor;
+	gravity_const = other.gravity_const;
+	mass = other.mass;
+	fire_wait = other.fire_wait;
+	max_delay = other.max_delay;
+	min_delay = other.min_delay;
+
+	damage = other.damage;
+	damage_time = other.damage_time;
+	atten_damage = other.atten_damage;
+	damage_incidence_max = other.damage_incidence_max;
+	damage_incidence_min = other.damage_incidence_min;
+
+	shockwave = other.shockwave;
+	dinky_shockwave = other.dinky_shockwave;
+
+	arm_time = other.arm_time;
+	arm_dist = other.arm_dist;
+	arm_radius = other.arm_radius;
+	det_range = other.det_range;
+	det_radius = other.det_radius;
+	proximity_radius = other.proximity_radius;
+	proximity_iff = other.proximity_iff;
+	proximity_species = other.proximity_species;
+	proximity_type = other.proximity_type;
+	proximity_class = other.proximity_class;
+	proximity_relation_mask = other.proximity_relation_mask;
+	proximity_detonate_chance = other.proximity_detonate_chance;
+	proximity_stealth_multiplier = other.proximity_stealth_multiplier;
+	mine_sensors_range = other.mine_sensors_range;
+	mine_targetable_range = other.mine_targetable_range;
+	mine_chase_duration = other.mine_chase_duration;
+	mine_detonates_on_chase_timeout = other.mine_detonates_on_chase_timeout;
+	mine_chase_cooldown = other.mine_chase_cooldown;
+	flak_detonation_accuracy = other.flak_detonation_accuracy;
+	flak_targeting_accuracy = other.flak_targeting_accuracy;
+	untargeted_flak_range_penalty = other.untargeted_flak_range_penalty;
+
+	armor_factor = other.armor_factor;
+	shield_factor = other.shield_factor;
+	subsystem_factor = other.subsystem_factor;
+
+	life_min = other.life_min;
+	life_max = other.life_max;
+	lifetime = other.lifetime;
+
+	energy_consumed = other.energy_consumed;
+
+	wi_flags = other.wi_flags;
+
+	turn_time = other.turn_time;
+	turn_accel_time = other.turn_accel_time;
+	cargo_size = other.cargo_size;
+	autoaim_fov = other.autoaim_fov;
+	rearm_rate = other.rearm_rate;
+	disallow_rearm = other.disallow_rearm;
+	reloaded_per_batch = other.reloaded_per_batch;
+	weapon_range = other.weapon_range;
+	optimum_range = other.optimum_range;
+	weapon_min_range = other.weapon_min_range;
+
+	aiming_flags = other.aiming_flags;
+	minimum_convergence_distance = other.minimum_convergence_distance;
+	convergence_distance = other.convergence_distance;
+
+	pierce_objects = other.pierce_objects;
+	spawn_children_on_pierce = other.spawn_children_on_pierce;
+
+	num_spawn_weapons_defined = other.num_spawn_weapons_defined;
+	maximum_children_spawned = other.maximum_children_spawned;
+	memcpy(spawn_info, other.spawn_info, sizeof(spawn_info));
+
+	lifetime_variation_factor_when_child = other.lifetime_variation_factor_when_child;
+
+	swarm_count = other.swarm_count;
+	SwarmWait = other.SwarmWait;
+
+	target_restrict = other.target_restrict;
+	target_restrict_objecttypes = other.target_restrict_objecttypes;
+	multi_lock = other.multi_lock;
+	max_seeking = other.max_seeking;
+	max_seekers_per_target = other.max_seekers_per_target;
+
+	ship_restrict = other.ship_restrict;
+	ship_restrict_strings = other.ship_restrict_strings;
+
+	trigger_lock = other.trigger_lock;
+	launch_reset_locks = other.launch_reset_locks;
+
+	auto_target_method = other.auto_target_method;
+
+	acquire_method = other.acquire_method;
+	min_lock_time = other.min_lock_time;
+	lock_pixels_per_sec = other.lock_pixels_per_sec;
+	catchup_pixels_per_sec = other.catchup_pixels_per_sec;
+	catchup_pixel_penalty = other.catchup_pixel_penalty;
+	lock_fov = other.lock_fov;
+
+	fov = other.fov;
+
+	seeker_strength = other.seeker_strength;
+
+	pre_launch_snd = other.pre_launch_snd;
+	pre_launch_snd_min_interval = other.pre_launch_snd_min_interval;
+	launch_snd = other.launch_snd;
+	cockpit_launch_snd = other.cockpit_launch_snd;
+	impact_snd = other.impact_snd;
+	disarmed_impact_snd = other.disarmed_impact_snd;
+	shield_impact_snd = other.shield_impact_snd;
+	flyby_snd = other.flyby_snd;
+	ambient_snd = other.ambient_snd;
+	start_firing_snd = other.start_firing_snd;
+	loop_firing_snd = other.loop_firing_snd;
+	linked_loop_firing_snd = other.linked_loop_firing_snd;
+	end_firing_snd = other.end_firing_snd;
+
+	hud_tracking_snd = other.hud_tracking_snd;
+	hud_locked_snd = other.hud_locked_snd;
+	hud_in_flight_snd = other.hud_in_flight_snd;
+	in_flight_play_type = other.in_flight_play_type;
+
+	tr_info = other.tr_info;
+
+	strcpy_s(icon_filename, other.icon_filename);
+	strcpy_s(anim_filename, other.anim_filename);
+	selection_effect = other.selection_effect;
+	fs2_effect_grid_color = other.fs2_effect_grid_color;
+	fs2_effect_scanline_color = other.fs2_effect_scanline_color;
+	fs2_effect_grid_density = other.fs2_effect_grid_density;
+	fs2_effect_wireframe_color = other.fs2_effect_wireframe_color;
+
+	shield_impact_effect_radius = other.shield_impact_effect_radius;
+	shield_impact_explosion_radius = other.shield_impact_explosion_radius;
+
+	impact_weapon_expl_effect = other.impact_weapon_expl_effect;
+	dinky_impact_weapon_expl_effect = other.dinky_impact_weapon_expl_effect;
+	flash_impact_weapon_expl_effect = other.flash_impact_weapon_expl_effect;
+
+	piercing_impact_effect = other.piercing_impact_effect;
+	piercing_impact_secondary_effect = other.piercing_impact_secondary_effect;
+
+	conditional_impacts = other.conditional_impacts;
+
+	muzzle_effect = other.muzzle_effect;
+
+	state_effects = other.state_effects;
+
+	emp_intensity = other.emp_intensity;
+	emp_time = other.emp_time;
+
+	recoil_modifier = other.recoil_modifier;
+
+	shudder_modifier = other.shudder_modifier;
+
+	weapon_reduce = other.weapon_reduce;
+	afterburner_reduce = other.afterburner_reduce;
+
+	vamp_regen = other.vamp_regen;
+
+	tag_time = other.tag_time;
+	tag_level = other.tag_level;
+
+	field_of_fire = other.field_of_fire;
+	fof_spread_rate = other.fof_spread_rate;
+	fof_reset_rate = other.fof_reset_rate;
+	max_fof_spread = other.max_fof_spread;
+	firing_pattern = other.firing_pattern;
+	shots = other.shots;
+	cycle_multishot = other.cycle_multishot;
+
+	cs_num_fired = other.cs_num_fired;
+	cs_radius = other.cs_radius;
+	cs_twist = other.cs_twist;
+	cs_crotate = other.cs_crotate;
+	cs_delay = other.cs_delay;
+	cs_random_angle = other.cs_random_angle;
+	cs_angle = other.cs_angle;
+
+	elec_time = other.elec_time;
+	elec_eng_mult = other.elec_eng_mult;
+	elec_weap_mult = other.elec_weap_mult;
+	elec_beam_mult = other.elec_beam_mult;
+	elec_sensors_mult = other.elec_sensors_mult;
+	elec_randomness = other.elec_randomness;
+	elec_use_new_style = other.elec_use_new_style;
+
+	SSM_index = other.SSM_index;
+
+	lssm_warpout_delay = other.lssm_warpout_delay;
+	lssm_warpin_delay = other.lssm_warpin_delay;
+	lssm_stage5_vel = other.lssm_stage5_vel;
+	lssm_warpin_radius = other.lssm_warpin_radius;
+	lssm_lock_range = other.lssm_lock_range;
+	lssm_warpeffect = other.lssm_warpeffect;
+
+	b_info = other.b_info;
+
+	particle_spewers = other.particle_spewers;
+
+	cm_aspect_effectiveness = other.cm_aspect_effectiveness;
+	cm_heat_effectiveness = other.cm_heat_effectiveness;
+	cm_effective_rad = other.cm_effective_rad;
+	cm_detonation_rad = other.cm_detonation_rad;
+	cm_launch_vec = other.cm_launch_vec;
+	cm_launch_speed = other.cm_launch_speed;
+	cm_launch_variance = other.cm_launch_variance;
+	cm_kill_single = other.cm_kill_single;
+	cmeasure_timer_interval = other.cmeasure_timer_interval;
+	cmeasure_firewait = other.cmeasure_firewait;
+	cmeasure_use_firewait = other.cmeasure_use_firewait;
+	cmeasure_failure_delay_multiplier_ai = other.cmeasure_failure_delay_multiplier_ai;
+	cmeasure_success_delay_multiplier_ai = other.cmeasure_success_delay_multiplier_ai;
+
+	weapon_submodel_rotate_accell = other.weapon_submodel_rotate_accell;
+	weapon_submodel_rotate_vel = other.weapon_submodel_rotate_vel;
+
+	damage_type_idx = other.damage_type_idx;
+	damage_type_idx_sav = other.damage_type_idx_sav;
+
+	armor_type_idx = other.armor_type_idx;
+
+	alpha_max = other.alpha_max;
+	alpha_min = other.alpha_min;
+	alpha_cycle = other.alpha_cycle;
+
+	weapon_hitpoints = other.weapon_hitpoints;
+
+	burst_shots = other.burst_shots;
+	burst_delay = other.burst_delay;
+	burst_flags = other.burst_flags;
+
+	thruster_flame = other.thruster_flame;
+	thruster_glow = other.thruster_glow;
+	thruster_glow_factor = other.thruster_glow_factor;
+
+	target_lead_scaler = other.target_lead_scaler;
+	num_targeting_priorities = other.num_targeting_priorities;
+	memcpy(targeting_priorities, other.targeting_priorities, sizeof(targeting_priorities));
+
+	failure_rate = other.failure_rate;
+	CLONE_UNIQUE_PTR(failure_sub_name);
+	failure_sub = other.failure_sub;
+
+	num_substitution_patterns = other.num_substitution_patterns;
+	memcpy(weapon_substitution_pattern, other.weapon_substitution_pattern, sizeof(weapon_substitution_pattern));
+	memcpy(weapon_substitution_pattern_names,
+		other.weapon_substitution_pattern_names,
+		sizeof(weapon_substitution_pattern_names));
+
+	score = other.score;
+
+	custom_data = other.custom_data;
+
+	custom_strings = other.custom_strings;
+
+	impact_decal = other.impact_decal;
+
+	on_create_program = other.on_create_program;
+
+	animations = other.animations;
+
+	weapon_launch_curves = other.weapon_launch_curves;
+	weapon_curves = other.weapon_curves;
+	weapon_hit_curves = other.weapon_hit_curves;
+	beam_curves = other.beam_curves;
+	beam_hit_curves = other.beam_hit_curves;
+}
+
 const char* weapon_info::get_display_name() const
 {
 	if (has_display_name())
@@ -9802,12 +10513,12 @@ SCP_map<SCP_string, weapon_stat_value> weapon_get_stats(const weapon_info &wi)
 	stats["is_beam"] = is_beam;
 	stats["allowed_for_player"] = (bool)wi.wi_flags[Weapon::Info_Flags::Player_allowed];
 
-	// Velocity and range
+	// max_speed and range
 	if (is_beam) {
-		stats["velocity"] = 0.0f;
+		stats["max_speed"] = 0.0f;
 		stats["standard_range"] = wi.b_info.range;
 	} else {
-		stats["velocity"] = wi.max_speed;
+		stats["max_speed"] = wi.max_speed;
 		stats["standard_range"] = wi.max_speed * wi.lifetime;
 	}
 
@@ -9914,7 +10625,7 @@ SCP_string weapon_get_stats_text(const weapon_info &wi)
 	if (is_beam) {
 		sprintf(buf, "\tVelocity: N/A        Range: %.0f\n", std::get<float>(stats["standard_range"]));
 	} else {
-		sprintf(buf, "\tVelocity: %-11.0fRange: %.0f\n", std::get<float>(stats["velocity"]), std::get<float>(stats["standard_range"]));
+		sprintf(buf, "\tVelocity: %-11.0fRange: %.0f\n", std::get<float>(stats["max_speed"]), std::get<float>(stats["standard_range"]));
 	}
 	result += buf;
 
@@ -9981,7 +10692,7 @@ void weapon_spew_stats(WeaponSpewType type)
 	static const csv_column columns[] = {
 		{"Name",              nullptr},
 		{"Type",              "type"},
-		{"Velocity",          "velocity"},
+		{"Velocity",          "max_speed"},
 		{"Range",             "standard_range"},
 		{"Damage Hull",       "damage_hull"},
 		{"DPS Hull",          "dps_hull"},
@@ -10018,7 +10729,7 @@ void weapon_spew_stats(WeaponSpewType type)
 	auto is_blank = [](const char *key, bool primary, bool is_beam) -> bool {
 		if (!key)
 			return false;
-		if (is_beam && !strcmp(key, "velocity"))
+		if (is_beam && !strcmp(key, "max_speed"))
 			return true;
 		if (primary && (!strcmp(key, "reload_rate") || !strcmp(key, "reload_rate_reciprocal")))
 			return true;
@@ -10319,4 +11030,26 @@ float weapon_get_apparent_size(const weapon& wp) {
 		wep_objp->radius * 2.0f,
 		g3_get_hfov(Eye_fov),
 		gr_screen.max_w) / i2fl(gr_screen.max_w);
+}
+
+float weapon_get_target_dot(const weapon& wp) {
+	const object* wep_objp = &Objects[wp.objnum];
+
+	vec3d target_pos;
+
+	if (wp.homing_object != &obj_used_list && (wp.homing_object->type != OBJ_NONE) && (!IS_VEC_NULL(&wp.homing_pos))) {
+		target_pos = wp.homing_pos;
+	} else if(wp.target_num > -1 && Objects[wp.target_num].type != OBJ_NONE && Objects[wp.target_num].signature == wp.target_sig)	{
+		target_pos = Objects[wp.target_num].pos;
+	} else {
+		return 1.f;
+	}
+	vec3d dir;
+	vm_vec_sub(&dir, &target_pos, &wep_objp->pos);
+	if (vm_vec_mag(&dir) == 0) {
+		return 1.f;
+	} else {
+		vm_vec_normalize(&dir);
+		return vm_vec_dot(&dir, &wep_objp->orient.vec.fvec);	
+	}
 }

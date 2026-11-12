@@ -414,7 +414,7 @@ void pilotfile::plr_read_containers()
 				container.map_data.emplace(key, data);
 			}
 		} else {
-			UNREACHABLE("Unknown container type %d", (int)container.type);
+			UNREACHABLE("Unknown container type %d", static_cast<int>(container.type));
 		}
 
 		Assert(container.is_eternal());
@@ -457,7 +457,7 @@ void pilotfile::plr_write_containers()
 				++i;
 			}
 		} else {
-			UNREACHABLE("Unknown container type %d", (int)container.type);
+			UNREACHABLE("Unknown container type %d", static_cast<int>(container.type));
 		}
 
 		handler->endSectionWrite();
@@ -568,7 +568,7 @@ void pilotfile::plr_read_stats()
 		for (size_t idx = 0; idx < list_size; idx++) {
 			auto j = all_time_stats.ship_kills[idx].index;
 
-			if (j >= 0) {
+			if (p->stats.kills.in_bounds(j)) {
 				p->stats.kills[j] = all_time_stats.ship_kills[idx].val;
 			}
 		}
@@ -665,7 +665,7 @@ void pilotfile::plr_read_stats_multi()
 		for (size_t idx = 0; idx < list_size; idx++) {
 			auto j = multi_stats.ship_kills[idx].index;
 
-			if (j >= 0) {
+			if (p->stats.kills.in_bounds(j)) {
 				p->stats.kills[j] = multi_stats.ship_kills[idx].val;
 			}
 		}
@@ -738,13 +738,15 @@ void pilotfile::plr_read_controls()
 		int axi, inv;
 
 		// Set up preset name, we'll populate the rest of the preset's data later
-		CC_preset preset;
-		preset.name = filename;
+		SCP_string preset_name = filename;
 
 		// strip off extension
-		auto n = preset.name.find_last_of('.');
-		preset.name.resize(n);
-		
+		auto n = preset_name.find_last_of('.');
+		preset_name.resize(n);
+
+		// Old pilot files only carry bindings, so this is always a user preset
+		CC_preset preset(std::move(preset_name), Preset_t::pst);
+
 		// Load in the bindings to Control_config
 		// ...First the digital controls
 		auto list_size = handler->startArrayRead("controls", true);

@@ -12,7 +12,7 @@ BufferType getBufferType(GpuHeap heap_type) {
 		return BufferType::Index;
 	case GpuHeap::NUM_VALUES:
 	default:
-		UNREACHABLE("Invalid heap type detected!");
+		UNREACHABLE("Invalid heap type %d detected!", static_cast<int>(heap_type));
 		return BufferType::Vertex;
 	}
 }
@@ -22,7 +22,11 @@ namespace graphics {
 namespace util {
 
 GPUMemoryHeap::GPUMemoryHeap(GpuHeap heap_type) {
-	_bufferHandle = gr_create_buffer(getBufferType(heap_type), BufferUsageHint::Static);
+	// Model vertex/index heaps are the geometry source for raytraced shadow
+	// acceleration structures, so they need the extra usage flags whenever RT
+	// shadows are available (no-op on backends/hardware without support).
+	bool rt_capable = gr_is_capable(gr_capability::CAPABILITY_RAYTRACED_SHADOWS);
+	_bufferHandle = gr_create_buffer(getBufferType(heap_type), BufferUsageHint::Static, rt_capable);
 
 	_allocator.reset(new ::util::HeapAllocator([this](size_t n) { resizeBuffer(n); }));
 }
@@ -65,6 +69,12 @@ void GPUMemoryHeap::freeGpuData(size_t offset) {
 }
 gr_buffer_handle GPUMemoryHeap::bufferHandle() {
 	return _bufferHandle;
+}
+size_t GPUMemoryHeap::usedBytes() const {
+	return _allocator->usedBytes();
+}
+size_t GPUMemoryHeap::bufferSize() const {
+	return _bufferSize;
 }
 
 }

@@ -292,10 +292,8 @@ void control_config_common_init_bindings() {
 	// init default preset
 	Control_config_presets.clear();
 
-	CC_preset preset;
+	CC_preset preset("default", Preset_t::hardcode);
 	preset.bindings.reserve(Control_config.size());
-	preset.name = "default";
-	preset.type = Preset_t::hardcode;
 
 	for (auto &item : Control_config) {
 		preset.bindings.push_back(CCB(item));
@@ -682,7 +680,7 @@ const char *textify_scancode(int code)
 	}
 
 	SCP_string name;
-	unicode::convert_encoding(name, SDL_GetKeyName(SDL_GetKeyFromScancode(fs2_to_sdl(keycode))), unicode::Encoding::Encoding_utf8);
+	unicode::convert_encoding(name, SDL_GetKeyName(SDL_GetKeyFromScancode(fs2_to_sdl(keycode), SDL_KMOD_NONE, false)), unicode::Encoding::Encoding_utf8);
 	strcat_s(text, name.c_str());
 	return text;
 }
@@ -1733,14 +1731,13 @@ size_t read_bind_1(CC_preset &preset) {
  */
 void control_config_common_read_section(int s, bool first_override) {
 	Assertion((s == 0) || (s == 1), "Expected value of s to be either 0 or 1, found %i instead.", s);
-	CC_preset new_preset;
+	CC_preset new_preset("", Preset_t::tbl);
 
 	// Set references to the default preset and bindings
 	auto& default_preset = Control_config_presets[0];
 	auto& default_bindings = default_preset.bindings;
 
 	new_preset.bindings.clear();
-	new_preset.type = Preset_t::tbl;
 
 	if (s == 0) {
 		// #ControlConfigOverride
@@ -2388,7 +2385,7 @@ SCP_string ValToCID(CID id) {
 
 	if (it == mCIDNameToVal.cend()) {
 		// Shouldn't happen
-		Error(LOCATION, "Unknown CID value %i", id);
+		UNREACHABLE("Unknown CID value %i", id);
 		return "NONE";
 
 	} else {
@@ -2518,9 +2515,11 @@ SCP_string ValToJoy(const CC_bind &bind) {
 		if (it == mAxisNameToVal.end()) {
 			// should never happen
 			UNREACHABLE("Unknown error occured during reverse lookup of joy input string.");
-		} // else print out value
-
-		str = it->first;
+			str = "NONE";
+		} else {
+			// print out value
+			str = it->first;
+		}
 
 /*	} else if (bind.flags & CCF_HAT) {
 		// TODO Still currently encoded as buttons
@@ -2609,25 +2608,51 @@ void CC_bind::invert_toggle() {
 	flags ^= CCF_INVERTED;
 }
 
+
+static bool compare_btn(short cid, const CC_bind& A, char& A_flags, const CC_bind& B, char& B_flags)
+{
+	auto A_btn = A.get_btn();
+	auto B_btn = B.get_btn();
+
+	auto current = io::joystick::getPlayerJoystick(cid);
+
+	if (current && current->isGamepad()) {
+		if (A_btn >= SDL_GAMEPAD_BUTTON_COUNT) {
+			A_btn = (A_btn - SDL_GAMEPAD_BUTTON_COUNT) + SDL_GAMEPAD_AXIS_LEFT_TRIGGER;
+			A_flags |= CCF_AXIS_BTN;
+		}
+
+		if (B_btn >= SDL_GAMEPAD_BUTTON_COUNT) {
+			B_btn = (B_btn - SDL_GAMEPAD_BUTTON_COUNT) + SDL_GAMEPAD_AXIS_LEFT_TRIGGER;
+			B_flags |= CCF_AXIS_BTN;
+		}
+	}
+
+	return (A_btn == B_btn);
+}
+
 bool CC_bind::conflicts_with(const CC_bind& B) const {
+	char A_flags = flags;
+	char B_flags = B.flags;
+
 	// Bail early if CID or btn are not the same
-	if ((cid != B.cid) || (btn != B.btn)) {
+	if ((cid != B.cid) || !compare_btn(cid, *this, A_flags, B, B_flags)) {
 		return false;
 	}
 
 	// Check if A is an Axis or Axis Button, and if B is an Axis or Axis Button
 	char mask = (CCF_AXIS_BTN | CCF_AXIS);
-	if ((flags & mask) && (B.flags & mask)) {
+	if ((A_flags & mask) && (B_flags & mask)) {
 		return true;
 	}
 
 	// Check if Hat
-	if (flags & B.flags & CCF_HAT) {
+	if (A_flags & B_flags & CCF_HAT) {
 		return true;
 	}
 
 	// Check if Ball
-	if (flags & B.flags & CCF_BALL) {
+	if (A_flags & B_flags & CCF_BALL) {
 		return true;
 	}
 
@@ -2639,7 +2664,7 @@ bool CC_bind::conflicts_with(const CC_bind& B) const {
 	// First off, check if A or B is NOT a button, as according to the mask.  Buttons do not have a flag, so we check
 	// if they are any of the other input types
 	// Next, we return the inverse of the result. Negative of a Negative = Positive. Not Not a button = Is a button
-	return !((flags | B.flags) & mask);
+	return !((A_flags | B_flags) & mask);
 }
 
 bool CC_bind::is_inverted() const {
@@ -2730,10 +2755,19 @@ SCP_string CC_bind::textify() const {
 		case CID_JOY0:
 		case CID_JOY1:
 		case CID_JOY2:
-		case CID_JOY3:
-			Assert((btn >= 0) && (btn < JOY_TOTAL_BUTTONS));
-			retval = SCP_string(textify_button(btn));
+		case CID_JOY3: {
+			auto axis = joy_get_button_axis(cid, btn);
+
+			if (axis < 0) {
+				Assert((btn >= 0) && (btn < JOY_TOTAL_BUTTONS));
+				retval = SCP_string(textify_button(btn));
+			} else {
+				Assert((axis >= 0) && (axis < NUM_AXIS_TEXT));
+				retval = SCP_string(Axis_text[axis]);
+			}
+
 			break;
+		}
 
 		case CID_NONE:
 		default:
@@ -2965,23 +2999,22 @@ CCI_builder& CCI_builder::operator()(IoActionId action_id, short primary, short 
 	return *this;
 }
 
-CC_preset& CC_preset::operator=(const CC_preset& A) {
-	name = A.name;
-	type = A.type;
-
-	std::copy(A.bindings.begin(), A.bindings.end(), bindings.begin());
-
+CC_preset& CC_preset::operator=(const CC_preset& other)
+{
+	if (this != &other) {
+		bindings = other.bindings;
+		name = other.name;
+		// 'type' is intentionally preserved to maintain instance identity
+	}
 	return *this;
-};
+}
 
-bool CC_preset::is_duplicate_of(CC_preset& A) {
-	for (size_t i = 0; i < A.bindings.size(); ++i) {
-		if (bindings[i] != A.bindings[i]) {
-			// Found a binding that's different.  Thus, this preset is not a duplicate
+bool CC_preset::is_duplicate_of(const CC_preset& other) const
+{
+	for (size_t i = 0; i < other.bindings.size(); ++i) {
+		if (bindings[i] != other.bindings[i]) {
 			return false;
 		}
 	}
-
-	// Else, did not find any differences in the bindings.  Thus, this preset is a duplicate
 	return true;
 }

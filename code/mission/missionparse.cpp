@@ -46,6 +46,7 @@
 #include "mission/missionlog.h"
 #include "mission/missionmessage.h"
 #include "mission/missionparse.h"
+#include "missioneditor/sexp_annotation_model.h"
 #include "missionui/fictionviewer.h"
 #include "missionui/missioncmdbrief.h"
 #include "missionui/redalert.h"
@@ -177,6 +178,9 @@ SCP_vector<SCP_string> Parse_names;
 
 SCP_vector<SCP_string> Mission_parse_warnings;
 
+// true while a mission is being parsed and post-processed
+bool Parsing_mission = false;
+
 // Routes a parse-time auto-correction notice to the right surface for the app:
 // outside QtFRED, the existing Warning(LOCATION, ...) popup; inside QtFRED, the
 // Mission_parse_warnings queue so the ErrorChecker can present it without a popup.
@@ -206,6 +210,9 @@ path_restriction_t Path_restrictions[MAX_PATH_RESTRICTIONS];
 constexpr int DEFAULT_LARGE_SHIP_NO_COLLIDE_COLLISION_GROUP = 0;
 
 extern int debrief_find_persona_index();
+
+// for mission_init
+extern SCP_vector<SCP_vm_unique_ptr<char>> Goal_target_names;
 
 static bool mission_has_layer_name(const mission* pm, const SCP_string& layerName) {
 	return std::any_of(pm->fred_layers.begin(), pm->fred_layers.end(), [&layerName](const SCP_string& existingLayer) {
@@ -268,8 +275,6 @@ const char *Ai_behavior_names[MAX_AI_BEHAVIORS] = {
 
 char *Cargo_names[MAX_CARGO];
 char Cargo_names_buf[MAX_CARGO][NAME_LENGTH];
-
-const char *Ship_class_names[MAX_SHIP_CLASSES];		// to be filled in from Ship_info array
 
 const char *Icon_names[MIN_BRIEF_ICONS] = {
 	"Fighter", "Fighter Wing", "Cargo", "Cargo Wing", "Largeship",
@@ -421,7 +426,8 @@ flag_def_list_new<Mission::Mission_Flags> Parse_mission_flags[] = {
 	{"Nebula Fog Color Override",                 Mission::Mission_Flags::Neb2_fog_color_override,    true, true},
 	{"Full Nebula Background Bitmaps",            Mission::Mission_Flags::Fullneb_background_bitmaps, true, true},
 	{"Preload Subspace Tunnel",                   Mission::Mission_Flags::Preload_subspace,           true, false},
-	{"Large Ships Do Not Collide By Default",    Mission::Mission_Flags::Large_ships_no_collide_by_default, true, false}
+	{"Large Ships Do Not Collide By Default",    Mission::Mission_Flags::Large_ships_no_collide_by_default, true, false},
+	{"Limit Support Rearm to Mission Pool",       Mission::Mission_Flags::Limited_support_rearm_pool, true, true}
 };
 
 parse_object_flag_description<Mission::Mission_Flags> Parse_mission_flag_descriptions[] = {
@@ -456,6 +462,7 @@ parse_object_flag_description<Mission::Mission_Flags> Parse_mission_flag_descrip
 	{Mission::Mission_Flags::Fullneb_background_bitmaps, "Show background bitmaps despite full nebula"},
 	{Mission::Mission_Flags::Preload_subspace,         "Preload the subspace tunnel for both the sexp and specs checkbox"},
 	{Mission::Mission_Flags::Large_ships_no_collide_by_default, "Automatically places all large ships in the configured collision group, preventing large ships from colliding with each other"},
+	{Mission::Mission_Flags::Limited_support_rearm_pool, "Support ships can only rearm from the mission weapon pool"},
 };
 
 const size_t Num_parse_mission_flags = sizeof(Parse_mission_flags) / sizeof(flag_def_list_new<Mission::Mission_Flags>);
@@ -527,6 +534,94 @@ flag_def_list_new<Mission::Parse_Object_Flags> Parse_object_flags[] = {
 	{ "cannot-perform-scan-show-cargo",		Mission::Parse_Object_Flags::SF_Cannot_perform_scan_show_cargo, true, false },
 	{ "no-targeting-limits",				Mission::Parse_Object_Flags::SF_No_targeting_limits, true, false},
 	{ "no-scanned-cargo",					Mission::Parse_Object_Flags::SF_No_scanned_cargo, true, false },
+};
+
+// One row per parse flag whose effect is "if set, set the corresponding flag on object/ship/AI."
+// Irregular flags (SF_Locked sets two, OF_No_collide is a remove) are handled by hand after the loop in resolve_parse_flags.
+// Any flag whose handling needs broader context (player-start gate, immobile soft-deprecation, MP red-alert override,
+// shield-strength resolution, reinforcement-in-wing) is handled in the outer wrapper of resolve_parse_flags.
+struct parse_object_flag_mapping
+{
+	Mission::Parse_Object_Flags parse_flag;
+	Object::Object_Flags        object_flag;  // or NUM_VALUES if N/A
+	Ship::Ship_Flags            ship_flag;    // or NUM_VALUES if N/A
+	AI::AI_Flags                ai_flag;      // or NUM_VALUES if N/A
+};
+
+static const parse_object_flag_mapping Parse_object_flag_targets[] =
+{
+	// Object flags
+	{ Mission::Parse_Object_Flags::OF_Protected,                       Object::Object_Flags::Protected,                Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::OF_No_shields,                      Object::Object_Flags::No_shields,               Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::OF_Player_start,                    Object::Object_Flags::Player_ship,              Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::OF_Invulnerable,                    Object::Object_Flags::Invulnerable,             Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::OF_Beam_protected,                  Object::Object_Flags::Beam_protected,           Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::OF_Flak_protected,                  Object::Object_Flags::Flak_protected,           Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::OF_Laser_protected,                 Object::Object_Flags::Laser_protected,          Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::OF_Missile_protected,               Object::Object_Flags::Missile_protected,        Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::Knossos_warp_in,                    Object::Object_Flags::Special_warpin,           Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::OF_Targetable_as_bomb,              Object::Object_Flags::Targetable_as_bomb,       Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::OF_Dont_change_position,            Object::Object_Flags::Dont_change_position,     Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::OF_Dont_change_orientation,         Object::Object_Flags::Dont_change_orientation,  Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::OF_Immobile,                        Object::Object_Flags::Immobile,                 Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::OF_Attackable_if_no_collide,        Object::Object_Flags::Attackable_if_no_collide, Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::NUM_VALUES },
+
+	// Ship flags
+	{ Mission::Parse_Object_Flags::SF_Cargo_known,                     Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Cargo_revealed,                   AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Ignore_count,                    Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Ignore_count,                     AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Reinforcement,                   Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Reinforcement,                    AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Escort,                          Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Escort,                           AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_No_arrival_music,                Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::No_arrival_music,                 AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_No_arrival_warp,                 Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::No_arrival_warp,                  AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_No_departure_warp,               Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::No_departure_warp,                AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Ship_locked,                     Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Ship_locked,                      AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Weapons_locked,                  Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Weapons_locked,                   AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Hidden_from_sensors,             Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Hidden_from_sensors,              AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Scannable,                       Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Scannable,                        AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Red_alert_store_status,          Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Red_alert_store_status,           AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Vaporize,                        Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Vaporize,                         AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Stealth,                         Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Stealth,                          AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Friendly_stealth_invis,          Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Friendly_stealth_invis,           AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Dont_collide_invis,              Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Dont_collide_invis,               AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Dock_leader,                     Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Dock_leader,                      AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Warp_broken,                     Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Warp_broken,                      AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Warp_never,                      Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Warp_never,                       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Primitive_sensors,               Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Primitive_sensors,                AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_No_subspace_drive,               Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::No_subspace_drive,                AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Nav_carry_status,                Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Navpoint_carry,                   AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Affected_by_gravity,             Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Affected_by_gravity,              AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Toggle_subsystem_scanning,       Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Toggle_subsystem_scanning,        AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_No_builtin_messages,             Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::No_builtin_messages,              AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Primaries_locked,                Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Primaries_locked,                 AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Secondaries_locked,              Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Secondaries_locked,               AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_No_death_scream,                 Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::No_death_scream,                  AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Always_death_scream,             Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Always_death_scream,              AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Nav_needslink,                   Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Navpoint_needslink,               AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Hide_ship_name,                  Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Hide_ship_name,                   AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Set_class_dynamically,           Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Set_class_dynamically,            AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Lock_all_turrets_initially,      Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Lock_all_turrets_initially,       AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Afterburner_locked,              Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Afterburner_locked,               AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::OF_Force_shields_on,                Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Force_shields_on,                 AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_No_ets,                          Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::No_ets,                           AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Cloaked,                         Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Cloaked,                          AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Scramble_messages,               Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Scramble_messages,                AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_No_disabled_self_destruct,       Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::No_disabled_self_destruct,        AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Has_display_name,                Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Has_display_name,                 AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Hide_mission_log,                Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Hide_mission_log,                 AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Same_arrival_warp_when_docked,   Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Same_arrival_warp_when_docked,    AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Same_departure_warp_when_docked, Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Same_departure_warp_when_docked,  AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Fail_sound_locked_primary,       Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Fail_sound_locked_primary,        AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Fail_sound_locked_secondary,     Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Fail_sound_locked_secondary,      AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Aspect_immune,                   Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Aspect_immune,                    AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Cannot_perform_scan_hide_cargo,  Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Cannot_perform_scan_hide_cargo,   AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_Cannot_perform_scan_show_cargo,  Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::Cannot_perform_scan_show_cargo,   AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_No_scanned_cargo,                Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::No_scanned_cargo,                 AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_No_targeting_limits,             Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::No_targeting_limits,              AI::AI_Flags::NUM_VALUES },
+	{ Mission::Parse_Object_Flags::SF_From_player_wing,                Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::From_player_wing,                 AI::AI_Flags::NUM_VALUES },
+
+	// AI flags
+	{ Mission::Parse_Object_Flags::AIF_Kamikaze,                       Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::Kamikaze   },
+	{ Mission::Parse_Object_Flags::AIF_No_dynamic,                     Object::Object_Flags::NUM_VALUES,               Ship::Ship_Flags::NUM_VALUES,                       AI::AI_Flags::No_dynamic },
 };
 
 parse_object_flag_description<Mission::Parse_Object_Flags> Parse_object_flag_descriptions[] = {
@@ -857,11 +952,45 @@ void parse_mission_info(mission *pm, bool basic = false)
 		if (!basic)
 			nebl_set_storm(Mission_parse_storm_name);
 	}
-	if(optional_string("+Fog Near Mult:")){
-		stuff_float(&Neb2_fog_near_mult);
+
+	bool found_neb2_modern = false;
+
+	if (optional_string("+Fog Near Mult:")) {
+		stuff_float(&Neb2_fog_legacy_near_mult);
 	}
-	if(optional_string("+Fog Far Mult:")){
-		stuff_float(&Neb2_fog_far_mult);
+	if (optional_string("+Fog Far Mult:")) {
+		stuff_float(&Neb2_fog_legacy_far_mult);
+	}
+
+	// Look for the modern values
+	if (optional_string("+Fog 1000m Visibility:")) {
+		stuff_float(&Neb2_fog_1000m_visibility);
+		found_neb2_modern = true;
+	}
+	if (optional_string("+Fog Near Distance:")) {
+		stuff_float(&Neb2_fog_near_distance);
+		found_neb2_modern = true;
+	}
+	if (optional_string("+Fog Skybox Clip Distance:")) {
+		stuff_float(&Neb2_fog_skybox_clip_distance);
+		found_neb2_modern = true;
+	}
+	if (optional_string("+Fog Clip Distance:")) {
+		stuff_float(&Neb2_fog_clip_distance);
+		found_neb2_modern = true;
+	}
+
+	// write legacy values on save if we are compatible with older formats
+	Neb2_fog_save_legacy_values = !found_neb2_modern;
+
+	// Convert legacy values if this mission was made before modern values were introduced
+	if (!found_neb2_modern) {
+		//This stems from the weird unchangeable constants of legacy fog
+		float denom = std::max(75.f * Neb2_fog_legacy_far_mult - Neb2_fog_legacy_near_mult, 1.0f);
+		Neb2_fog_1000m_visibility = powf(10.f, -100.f / denom);
+		Neb2_fog_near_distance = 10.f * Neb2_fog_legacy_near_mult;
+		Neb2_fog_skybox_clip_distance = 0.f; // Apparently, skybox fog was just outright broken...
+		Neb2_fog_clip_distance = Default_max_draw_distance;
 	}
 
 	// Goober5000 - ship contrail speed threshold
@@ -936,6 +1065,18 @@ void parse_mission_info(mission *pm, bool basic = false)
 		pm->support_ships.max_support_ships = (temp > 0) ? 0 : -1;
 	}
 
+	if (optional_string("+Disallow Support Rearm:")) {
+		int temp;
+		stuff_int(&temp);
+		pm->support_ships.disallow_rearm = (temp != 0);
+	}
+
+	if (optional_string("+Allow Support Rearm Weapon Precedence:")) {
+		int temp;
+		stuff_int(&temp);
+		pm->support_ships.allow_rearm_weapon_precedence = (temp != 0);
+	}
+
 	if ( optional_string("+Hull Repair Ceiling:"))
 	{
 		float temp;
@@ -956,6 +1097,12 @@ void parse_mission_info(mission *pm, bool basic = false)
 		if (temp <= 100.0f && temp >= 0.0f) {
 			pm->support_ships.max_subsys_repair_val = temp;
 		}
+	}
+
+	if (optional_string("+Support Rearm Pool From Loadout:")) {
+		int temp;
+		stuff_int(&temp);
+		pm->support_ships.rearm_pool_from_loadout = (temp != 0);
 	}
 
 	if (optional_string("+All Teams Attack")){
@@ -1162,18 +1309,26 @@ void parse_player_info(mission *pm)
 void parse_player_info2(mission *pm)
 {
 	int nt, i;
-	SCP_vector<loadout_row> list, list2;
+	SCP_vector<loadout_row> list, list2, support_rearm_list;
 	team_data *ptr;
 
 	if (OnLoadoutAboutToParseHook->isActive()) {
 		OnLoadoutAboutToParseHook->run();
 	}
 
+	// The support rearm pool starts at -1 (unlimited) per-weapon from support_ship_info::reset().
+	// Entries are overridden below for explicit "+Support Rearm Pool:" data, or seeded from the
+	// loadout when "+Support Rearm Pool From Loadout:" is set.
+
 	// read in a ship/weapon pool for each team.
 	for ( nt = 0; nt < Num_teams; nt++ ) {
-		int num_choices;
-
 		ptr = &Team_data[nt];
+
+		// clear anything from a previously parsed mission
+		ptr->ship_choices.clear();
+		ptr->weapon_choices.clear();
+		ptr->required_weapons.clear();
+
 		// get the shipname for single player missions
 		// MWA -- make this required later!!!!
 		if ( optional_string("$Starting Shipname:") )
@@ -1188,59 +1343,44 @@ void parse_player_info2(mission *pm)
 		required_string("$Ship Choices:");
 		stuff_loadout_list(list, ParseLookupType::MISSION_LOADOUT_SHIP_LIST);
 
-		num_choices = 0;
-
 		// check ship class loadout entries
 		for (auto &sc : list) {
+			if (!Ship_info.in_bounds(sc.index))
+				continue;
+
 			// in a campaign, see if the player is allowed the ships or not.  Remove them from the
 			// pool if they are not allowed
 			if (Game_mode & GM_CAMPAIGN_MODE || (MULTIPLAYER_CLIENT)) {
-				if ( !Campaign.ships_allowed[sc.index] )
+				if ( !Campaign.ships_allowed.contains(sc.index) )
 					continue;
 			}
-			if (sc.index < 0 || sc.index >= ship_info_size())
-				continue;
 
-			ptr->ship_list[num_choices] = sc.index;
+			auto &entry = ptr->ship_choices.emplace_back();
+			entry.class_index = sc.index;
+			entry.count = sc.count;
 
-			// if the list isn't set by a variable leave the variable name empty
-			if (sc.index_sexp_var == NOT_SET_BY_SEXP_VARIABLE) {
-				strcpy_s(ptr->ship_list_variables[num_choices], "") ;
-			}
-			else {
-				strcpy_s(ptr->ship_list_variables[num_choices], Sexp_variables[sc.index_sexp_var].variable_name);
-			}
-
-			ptr->ship_count[num_choices] = sc.count;
-			ptr->loadout_total += sc.count;
-
-			// if the list isn't set by a variable leave the variable name empty
-			if (sc.count_sexp_var == NOT_SET_BY_SEXP_VARIABLE) {
-				strcpy_s(ptr->ship_count_variables[num_choices], "");
-			}
-			else {
-				strcpy_s(ptr->ship_count_variables[num_choices], Sexp_variables[sc.count_sexp_var].variable_name);
-			}
-
-			num_choices++;
+			// if the entry isn't set by a variable leave the variable name empty
+			if (sc.index_sexp_var != NOT_SET_BY_SEXP_VARIABLE)
+				entry.class_variable = Sexp_variables[sc.index_sexp_var].variable_name;
+			if (sc.count_sexp_var != NOT_SET_BY_SEXP_VARIABLE)
+				entry.count_variable = Sexp_variables[sc.count_sexp_var].variable_name;
 		}
-		ptr->num_ship_choices = num_choices;
 
 		ptr->default_ship = -1;
 		if (optional_string("+Default_ship:")) {
 			char str[NAME_LENGTH];
 			stuff_string(str, F_NAME, NAME_LENGTH);
 			ptr->default_ship = ship_info_lookup(str);
-			if (-1 == ptr->default_ship) {
-				WarningEx(LOCATION, "Mission: %s\nUnknown default ship %s!  Defaulting to %s.", pm->name.c_str(), str, Ship_info[ptr->ship_list[0]].name );
-				ptr->default_ship = ptr->ship_list[0]; // default to 1st in list
+			if (-1 == ptr->default_ship && !ptr->ship_choices.empty()) {
+				WarningEx(LOCATION, "Mission: %s\nUnknown default ship %s!  Defaulting to %s.", pm->name.c_str(), str, Ship_info[ptr->ship_choices.front().class_index].name );
+				ptr->default_ship = ptr->ship_choices.front().class_index; // default to 1st in list
 			}
 			// see if the player's default ship is an allowable ship (campaign only). If not, then what
 			// do we do?  choose the first allowable one?
 			if (Game_mode & GM_CAMPAIGN_MODE || (MULTIPLAYER_CLIENT)) {
-				if ( !(Campaign.ships_allowed[ptr->default_ship]) ) {
+				if ( ptr->default_ship >= 0 && !Campaign.ships_allowed.contains(ptr->default_ship) ) {
 					for (i = 0; i < ship_info_size(); i++ ) {
-						if ( Campaign.ships_allowed[i] ) {
+						if ( Campaign.ships_allowed.contains(i) ) {
 							ptr->default_ship = i;
 							break;
 						}
@@ -1250,65 +1390,99 @@ void parse_player_info2(mission *pm)
 			}
 		}
 
-		if (ptr->default_ship == -1)  // invalid or not specified, make first in list
-			ptr->default_ship = ptr->ship_list[0];
+		if (ptr->default_ship == -1 && !ptr->ship_choices.empty())  // invalid or not specified, make first in list
+			ptr->default_ship = ptr->ship_choices.front().class_index;
 
 		required_string("+Weaponry Pool:");
 		stuff_loadout_list(list2, ParseLookupType::MISSION_LOADOUT_WEAPON_LIST);
 
-		num_choices = 0;
+		// When seeding the rearm pool from the loadout, the per-weapon loadout counts below accumulate
+		// from a clean baseline: rearm_pool_default() is 0 in this mode, so no reset is needed here.
 
 		// check weapon class loadout entries
 		for (auto &wc : list2) {
+			if (!Weapon_info.in_bounds(wc.index))
+				continue;
+
 			// in a campaign, see if the player is allowed the weapons or not.  Remove them from the
 			// pool if they are not allowed
 			if (Game_mode & GM_CAMPAIGN_MODE || (MULTIPLAYER_CLIENT)) {
-				if ( !Campaign.weapons_allowed[wc.index] ) {
+				if ( !Campaign.weapons_allowed.contains(wc.index) ) {
 					continue;
 				}
 			}
-			if (wc.index < 0 || wc.index >= weapon_info_size())
-				continue;
 
 			// always allow the pool to be added in FRED, it is a verbal warning
 			// to let the mission dev know about the problem
 			if ( !(Weapon_info[wc.index].wi_flags[Weapon::Info_Flags::Player_allowed]) && !Fred_running ) {
-				WarningEx(LOCATION, "Weapon '%s' in weapon pool isn't allowed on player loadout! Ignoring it ...\n", Weapon_info[wc.index].name);
+				error_display(0, "Weapon '%s' in weapon pool isn't allowed on player loadout! Ignoring it ...\n", Weapon_info[wc.index].name);
 				continue;
 			}
 
-			ptr->weaponry_pool[num_choices] = wc.index; 
-			ptr->weaponry_count[num_choices] = wc.count;
+			auto &entry = ptr->weapon_choices.emplace_back();
+			entry.class_index = wc.index;
+			entry.count = wc.count;
 
-			// if the list isn't set by a variable leave the variable name empty
-			if (wc.index_sexp_var == NOT_SET_BY_SEXP_VARIABLE) {
-				strcpy_s(ptr->weaponry_pool_variable[num_choices], "");
-			}
-			else {
-				strcpy_s(ptr->weaponry_pool_variable[num_choices], Sexp_variables[wc.index_sexp_var].variable_name);
-			}
-
-			// if the list isn't set by a variable leave the variable name empty
-			if (wc.count_sexp_var == NOT_SET_BY_SEXP_VARIABLE) {
-				strcpy_s(ptr->weaponry_amount_variable[num_choices], "");
-			}
-			else {
-				strcpy_s(ptr->weaponry_amount_variable[num_choices], Sexp_variables[wc.count_sexp_var].variable_name);
+			if (pm->support_ships.rearm_pool_from_loadout) {
+				// disallow_rearm weapons stay at the from_loadout default of 0, i.e. absent
+				if (!Weapon_info[wc.index].disallow_rearm && wc.count > 0) {
+					int cur = pm->support_ships.rearm_weapon_pool[nt].value_or(wc.index, 0);
+					if (cur >= 0) {
+						pm->support_ships.rearm_weapon_pool[nt][wc.index] = cur + wc.count;
+					}
+				}
 			}
 
-			num_choices++; 
+			// if the entry isn't set by a variable leave the variable name empty
+			if (wc.index_sexp_var != NOT_SET_BY_SEXP_VARIABLE)
+				entry.class_variable = Sexp_variables[wc.index_sexp_var].variable_name;
+			if (wc.count_sexp_var != NOT_SET_BY_SEXP_VARIABLE)
+				entry.count_variable = Sexp_variables[wc.count_sexp_var].variable_name;
 		}
-		ptr->num_weapon_choices = num_choices;
 
-		memset(ptr->weapon_required, 0, MAX_WEAPON_TYPES * sizeof(bool));
+		if (optional_string("+Support Rearm Pool:")) {
+			support_rearm_list.clear();
+			stuff_loadout_list(support_rearm_list, ParseLookupType::MISSION_LOADOUT_WEAPON_LIST);
+
+			if (pm->support_ships.rearm_pool_from_loadout) {
+				error_display(0, "+Support Rearm Pool is set but +Support Rearm Pool From Loadout is also enabled! The explicit pool will be ignored.\n");
+			} else {
+				for (const auto& wc : support_rearm_list) {
+					if (wc.index < 0 || wc.index >= weapon_info_size()) {
+						continue;
+					}
+
+					if (!(Weapon_info[wc.index].wi_flags[Weapon::Info_Flags::Player_allowed]) && !Fred_running) {
+						error_display(0,
+							"Weapon '%s' in support rearm pool isn't allowed on player loadout! Ignoring it ...\n",
+							Weapon_info[wc.index].name);
+						continue;
+					}
+
+					auto& team_pool = pm->support_ships.rearm_weapon_pool[nt];
+					if (Weapon_info[wc.index].disallow_rearm) {
+						team_pool[wc.index] = 0;
+					} else if (wc.count < 0) {
+						team_pool.erase(wc.index);	// explicit unlimited == the -1 default, i.e. absent
+					} else if (wc.count == 0) {
+						team_pool[wc.index] = 0;
+					} else if (wc.count > 0) {
+						// First explicit entry replaces the -1 (unlimited) default; later duplicate entries accumulate.
+						int cur = team_pool.value_or(wc.index, -1);
+						team_pool[wc.index] = (cur < 0) ? wc.count : cur + wc.count;
+					}
+				}
+			}
+		}
+
 		if (optional_string("+Required for mission:"))
 		{
-			int num_weapons;
-			int weapon_list_buf[MAX_WEAPON_TYPES];
-			num_weapons = sz2i(stuff_int_list(weapon_list_buf, MAX_WEAPON_TYPES, ParseLookupType::WEAPON_LIST_TYPE));
+			SCP_vector<int> weapon_list_buf;
+			stuff_int_list(weapon_list_buf, ParseLookupType::WEAPON_LIST_TYPE);
 
-			for (i = 0; i < num_weapons; i++)
-				ptr->weapon_required[weapon_list_buf[i]] = true;
+			for (int weapon_class : weapon_list_buf)
+				if (Weapon_info.in_bounds(weapon_class))
+					ptr->required_weapons.insert(weapon_class);
 		}
 	}
 
@@ -1826,11 +2000,6 @@ void parse_briefing(mission * /*pm*/, int flags)
 
 			Assert(bs->num_icons <= MAX_STAGE_ICONS );
 
-			// static alias stuff - stupid, but it seems to be necessary
-			auto temp_team_names = std::unique_ptr<const char* []>(new const char*[Iff_info.size()]);
-			for (i = 0; i < (int)Iff_info.size(); i++)
-				temp_team_names[i] = Iff_info[i].iff_name;
-
 			while (required_string_either("$end_stage", "$start_icon"))
 			{
 				required_string("$start_icon");
@@ -1862,9 +2031,9 @@ void parse_briefing(mission * /*pm*/, int flags)
 						bi->type = ICON_TRANSPORT_WING;
 				}
 
-				find_and_stuff("$team:", &bi->team, F_NAME, temp_team_names.get(), Iff_info.size(), "team name");
+				find_and_stuff("$team:", &bi->team, F_NAME, Iff_info_names.data(), Iff_info_names.size(), "team name");
 
-				find_and_stuff("$class:", &bi->ship_class, F_NAME, Ship_class_names, Ship_info.size(), "ship class");
+				find_and_stuff("$class:", &bi->ship_class, F_NAME, Ship_class_names.data(), Ship_class_names.size(), "ship class");
 				bi->modelnum = -1;
 				bi->model_instance_num = -1;
 
@@ -2246,6 +2415,11 @@ void parse_copy_wing_ai_to_ship(wing *wingp, ai_info *aip);
 /**
  * Given a stuffed p_object struct, create an object and fill in the necessary fields.
  * @return object number.
+ *
+ * Per-ship field handling here MUST stay in sync with:
+ *   Fred_mission_save::save_objects() / save_common_object_data() in missionsave.cpp
+ *   clone_ship_instance_data() in missioneditor/objectduplication.cpp
+ * When you add a new editable ship field, touch all three.
  */
 int parse_create_object_sub(p_object *p_objp, bool standalone_ship)
 {
@@ -2408,55 +2582,17 @@ int parse_create_object_sub(p_object *p_objp, bool standalone_ship)
 	}
 
 	// check the parse object's flags for possible things to set on this newly created ship
-	resolve_parse_flags(&Objects[objnum], p_objp->flags);
+	resolve_parse_flags(p_objp->flags, *shipp, (p_objp->ship_max_shield_strength == 0.0f));
 
-
-	// other flag checks
+	// flag post-processing
 ////////////////////////
 
-	// forcing the shields on or off depending on flags -- but only if shield strength supports it
-
-	// no strength means we can't have shields, period
-    if (p_objp->ship_max_shield_strength == 0.0f)
-        Objects[objnum].flags.set(Object::Object_Flags::No_shields);
-    // force shields on means we have them regardless of other flags; per r5332 this ranks above the next check
-    else if (p_objp->flags[Mission::Parse_Object_Flags::OF_Force_shields_on])
-        Objects[objnum].flags.remove(Object::Object_Flags::No_shields);
-    // intrinsic no-shields means we have them off in-game
-    else if (!Fred_running && (sip->flags[Ship::Info_Flags::Intrinsic_no_shields]))
-        Objects[objnum].flags.set(Object::Object_Flags::No_shields);
-
-	// don't set the flag if the mission is ongoing in a multiplayer situation. This will be set by the players in the
-	// game only before the game or during respawning.
-	// MWA -- changed the next line to remove the !(Game_mode & GM_MULTIPLAYER).  We shouldn't be setting
-	// this flag in single player mode -- it gets set in post process mission.
-    if ((p_objp->flags[Mission::Parse_Object_Flags::OF_Player_start]) && (Fred_running || ((Game_mode & GM_MULTIPLAYER) && !(Game_mode & GM_IN_MISSION)))) {
-		Objects[objnum].flags.set(Object::Object_Flags::Player_ship);
-	}
-
-	// a couple of ai_info flags.  Also, do a reasonable default for the kamikaze damage regardless of
-	// whether this flag is set or not
-	if (p_objp->flags[Mission::Parse_Object_Flags::AIF_Kamikaze])
-	{
-		Ai_info[shipp->ai_index].ai_flags.set(AI::AI_Flags::Kamikaze);
-		Ai_info[shipp->ai_index].kamikaze_damage = p_objp->kamikaze_damage;
-	}
-
-	if (p_objp->flags[Mission::Parse_Object_Flags::AIF_No_dynamic])
-		Ai_info[shipp->ai_index].ai_flags.set(AI::AI_Flags::No_dynamic);
-
-	if (p_objp->flags[Mission::Parse_Object_Flags::SF_Red_alert_store_status])
-	{
-		if (!(Game_mode & GM_MULTIPLAYER)) {
-			shipp->flags.set(Ship::Ship_Flags::Red_alert_store_status);
-		}
-	}
-
-	if (p_objp->flags[Mission::Parse_Object_Flags::Knossos_warp_in])
-	{
-        Objects[objnum].flags.set(Object::Object_Flags::Special_warpin);
+	if (Objects[objnum].flags[Object::Object_Flags::Special_warpin])
 		Knossos_warp_ani_used = true;
-	}
+
+	// do a reasonable default for the kamikaze damage
+	if (Ai_info[shipp->ai_index].ai_flags[AI::AI_Flags::Kamikaze])
+		Ai_info[shipp->ai_index].kamikaze_damage = p_objp->kamikaze_damage;
 
 	// set the orders that this ship will accept.  It will have already been set to default from the
 	// ship create code, so only set them if the parse object flags say they are unique
@@ -2708,8 +2844,7 @@ int parse_create_object_sub(p_object *p_objp, bool standalone_ship)
 			if ((100.0f - sssp->percent) < 0.5)
 			{
 				ptr->current_hits = 0.0f;
-				if (ptr->submodel_instance_1 != nullptr)
-					ptr->submodel_instance_1->blown_off = true;
+				blow_off_subsystem_submodels(shipp, ptr);
 			}
 			else
 			{
@@ -2975,234 +3110,87 @@ void parse_copy_wing_ai_to_ship(wing *wingp, ai_info *aip)
 		aip->ai_flags.set(AI::AI_Flags::No_dynamic);
 }
 
-// Goober5000
-void resolve_parse_flags(object *objp, flagset<Mission::Parse_Object_Flags> &parse_flags)
+static void resolve_parse_flags(const flagset<Mission::Parse_Object_Flags> &parse_flags, flagset<Object::Object_Flags> &object_flags, flagset<Ship::Ship_Flags> &ship_flags, flagset<AI::AI_Flags> &ai_flags)
 {
-    Assert(objp != NULL);
-    ship *shipp = &Ships[objp->instance];
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Cargo_known])
-        shipp->flags.set(Ship::Ship_Flags::Cargo_revealed);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Ignore_count])
-        shipp->flags.set(Ship::Ship_Flags::Ignore_count);
-
-    if (parse_flags[Mission::Parse_Object_Flags::OF_Protected])
-        objp->flags.set(Object::Object_Flags::Protected);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Reinforcement])
-    {
-        //Individual ships in wings can't be reinforcements - FUBAR
-        if (shipp->wingnum >= 0)
-        {
-            Warning(LOCATION, "Ship %s is a reinforcement unit but is a member of a wing. Ignoring reinforcement flag.", shipp->ship_name);
-        }
-        else
-        {
-            shipp->flags.set(Ship::Ship_Flags::Reinforcement);
-        }
-    }
-
-    if ((parse_flags[Mission::Parse_Object_Flags::OF_No_shields]) && (parse_flags[Mission::Parse_Object_Flags::OF_Force_shields_on]))
-    {
-        parse_warning_or_record("Ship %s has both the \"force-shields-on\" and \"no-shields\" flags; this is inconsistent.", shipp->ship_name);
-    }
-    if (parse_flags[Mission::Parse_Object_Flags::OF_No_shields])
-        objp->flags.set(Object::Object_Flags::No_shields);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Escort])
-        shipp->flags.set(Ship::Ship_Flags::Escort);
-
-    // P_OF_PLAYER_START is handled in parse_create_object_sub
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_No_arrival_music])
-        shipp->flags.set(Ship::Ship_Flags::No_arrival_music);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_No_arrival_warp])
-        shipp->flags.set(Ship::Ship_Flags::No_arrival_warp);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_No_departure_warp])
-        shipp->flags.set(Ship::Ship_Flags::No_departure_warp);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Ship_locked])
-        shipp->flags.set(Ship::Ship_Flags::Ship_locked);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Weapons_locked])
-        shipp->flags.set(Ship::Ship_Flags::Weapons_locked);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Locked]) {
-        shipp->flags.set(Ship::Ship_Flags::Ship_locked);
-        shipp->flags.set(Ship::Ship_Flags::Weapons_locked);
-    }
-
-    if (parse_flags[Mission::Parse_Object_Flags::OF_Invulnerable])
-        objp->flags.set(Object::Object_Flags::Invulnerable);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Hidden_from_sensors])
-        shipp->flags.set(Ship::Ship_Flags::Hidden_from_sensors);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Scannable])
-        shipp->flags.set(Ship::Ship_Flags::Scannable);
-
-    // P_AIF_KAMIKAZE, P_AIF_NO_DYNAMIC, and P_SF_RED_ALERT_CARRY are handled in parse_create_object_sub
-
-    if (parse_flags[Mission::Parse_Object_Flags::OF_Beam_protected])
-        objp->flags.set(Object::Object_Flags::Beam_protected);
-
-    if (parse_flags[Mission::Parse_Object_Flags::OF_Flak_protected])
-        objp->flags.set(Object::Object_Flags::Flak_protected);
-
-    if (parse_flags[Mission::Parse_Object_Flags::OF_Laser_protected])
-        objp->flags.set(Object::Object_Flags::Laser_protected);
-
-    if (parse_flags[Mission::Parse_Object_Flags::OF_Missile_protected])
-        objp->flags.set(Object::Object_Flags::Missile_protected);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Vaporize])
-        shipp->flags.set(Ship::Ship_Flags::Vaporize);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Stealth])
-        shipp->flags.set(Ship::Ship_Flags::Stealth);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Friendly_stealth_invis])
-        shipp->flags.set(Ship::Ship_Flags::Friendly_stealth_invis);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Dont_collide_invis])
-        shipp->flags.set(Ship::Ship_Flags::Dont_collide_invis);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Primitive_sensors])
-        shipp->flags.set(Ship::Ship_Flags::Primitive_sensors);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_No_subspace_drive])
-        shipp->flags.set(Ship::Ship_Flags::No_subspace_drive);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Nav_carry_status])
-        shipp->flags.set(Ship::Ship_Flags::Navpoint_carry);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Affected_by_gravity])
-        shipp->flags.set(Ship::Ship_Flags::Affected_by_gravity);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Toggle_subsystem_scanning])
-        shipp->flags.set(Ship::Ship_Flags::Toggle_subsystem_scanning);
-
-    if (parse_flags[Mission::Parse_Object_Flags::OF_Targetable_as_bomb])
-        objp->flags.set(Object::Object_Flags::Targetable_as_bomb);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_No_builtin_messages])
-        shipp->flags.set(Ship::Ship_Flags::No_builtin_messages);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Primaries_locked])
-        shipp->flags.set(Ship::Ship_Flags::Primaries_locked);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Secondaries_locked])
-        shipp->flags.set(Ship::Ship_Flags::Secondaries_locked);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Set_class_dynamically])
-        shipp->flags.set(Ship::Ship_Flags::Set_class_dynamically);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_No_death_scream])
-        shipp->flags.set(Ship::Ship_Flags::No_death_scream);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Always_death_scream])
-        shipp->flags.set(Ship::Ship_Flags::Always_death_scream);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Nav_needslink])
-        shipp->flags.set(Ship::Ship_Flags::Navpoint_needslink);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Hide_ship_name])
-        shipp->flags.set(Ship::Ship_Flags::Hide_ship_name);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Lock_all_turrets_initially])
-        shipp->flags.set(Ship::Ship_Flags::Lock_all_turrets_initially);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Afterburner_locked])
-        shipp->flags.set(Ship::Ship_Flags::Afterburner_locked);
-
-    if (parse_flags[Mission::Parse_Object_Flags::OF_Force_shields_on])
-        shipp->flags.set(Ship::Ship_Flags::Force_shields_on);
-
-    if (parse_flags[Mission::Parse_Object_Flags::OF_Dont_change_position])
-        objp->flags.set(Object::Object_Flags::Dont_change_position);
-
-    if (parse_flags[Mission::Parse_Object_Flags::OF_Dont_change_orientation])
-        objp->flags.set(Object::Object_Flags::Dont_change_orientation);
-
-    if (parse_flags[Mission::Parse_Object_Flags::OF_Immobile])
-    {
-        // handle "soft deprecation" of Immobile by setting the two half-flags, but only in FRED
-        // (FRED has dialog support for the two half-flags but not the legacy Immobile flag)
-        if (Fred_running)
-        {
-            objp->flags.set(Object::Object_Flags::Dont_change_position);
-            objp->flags.set(Object::Object_Flags::Dont_change_orientation);
-
-            // keep track of migrated ships
-            Fred_migrated_immobile_ships.insert(objp->instance);
-        }
-        else
-            objp->flags.set(Object::Object_Flags::Immobile);
-    }
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_No_ets])
-        shipp->flags.set(Ship::Ship_Flags::No_ets);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Cloaked])
-        shipp->flags.set(Ship::Ship_Flags::Cloaked);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Scramble_messages])
-        shipp->flags.set(Ship::Ship_Flags::Scramble_messages);
-
-    if (parse_flags[Mission::Parse_Object_Flags::OF_No_collide])
-        objp->flags.remove(Object::Object_Flags::Collides);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_No_disabled_self_destruct])
-        shipp->flags.set(Ship::Ship_Flags::No_disabled_self_destruct);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Dock_leader])
-        shipp->flags.set(Ship::Ship_Flags::Dock_leader);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Warp_broken])
-        shipp->flags.set(Ship::Ship_Flags::Warp_broken);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Warp_never])
-        shipp->flags.set(Ship::Ship_Flags::Warp_never);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Has_display_name])
-        shipp->flags.set(Ship::Ship_Flags::Has_display_name);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Hide_mission_log])
-        shipp->flags.set(Ship::Ship_Flags::Hide_mission_log);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Same_arrival_warp_when_docked])
-        shipp->flags.set(Ship::Ship_Flags::Same_arrival_warp_when_docked);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Same_departure_warp_when_docked])
-		shipp->flags.set(Ship::Ship_Flags::Same_departure_warp_when_docked);
-
-    if (parse_flags[Mission::Parse_Object_Flags::OF_Attackable_if_no_collide])
-		objp->flags.set(Object::Object_Flags::Attackable_if_no_collide);
-
-	if (parse_flags[Mission::Parse_Object_Flags::SF_Fail_sound_locked_primary])
-		shipp->flags.set(Ship::Ship_Flags::Fail_sound_locked_primary);
-
-	if (parse_flags[Mission::Parse_Object_Flags::SF_Fail_sound_locked_secondary])
-		shipp->flags.set(Ship::Ship_Flags::Fail_sound_locked_secondary);
-
-	if (parse_flags[Mission::Parse_Object_Flags::SF_Aspect_immune])
-		shipp->flags.set(Ship::Ship_Flags::Aspect_immune);
-
-	if (parse_flags[Mission::Parse_Object_Flags::SF_Cannot_perform_scan_hide_cargo])
-		shipp->flags.set(Ship::Ship_Flags::Cannot_perform_scan_hide_cargo);
-	if (parse_flags[Mission::Parse_Object_Flags::SF_Cannot_perform_scan_show_cargo])
-		shipp->flags.set(Ship::Ship_Flags::Cannot_perform_scan_show_cargo);
-	if (parse_flags[Mission::Parse_Object_Flags::SF_No_scanned_cargo])
-		shipp->flags.set(Ship::Ship_Flags::No_scanned_cargo);
-
-	if (parse_flags[Mission::Parse_Object_Flags::SF_No_targeting_limits])
-		shipp->flags.set(Ship::Ship_Flags::No_targeting_limits);
-
-	if (parse_flags[Mission::Parse_Object_Flags::SF_From_player_wing])
-		shipp->flags.set(Ship::Ship_Flags::From_player_wing);
+	// 1-to-1 mappings (most flags)
+	for (const auto &m : Parse_object_flag_targets)
+	{
+		if (!parse_flags[m.parse_flag])
+			continue;
+		if (m.object_flag != Object::Object_Flags::NUM_VALUES)
+			object_flags.set(m.object_flag);
+		if (m.ship_flag != Ship::Ship_Flags::NUM_VALUES)
+			ship_flags.set(m.ship_flag);
+		if (m.ai_flag != AI::AI_Flags::NUM_VALUES)
+			ai_flags.set(m.ai_flag);
+	}
+
+	// SF_Locked is shorthand for both lock flags
+	if (parse_flags[Mission::Parse_Object_Flags::SF_Locked])
+	{
+		ship_flags.set(Ship::Ship_Flags::Ship_locked);
+		ship_flags.set(Ship::Ship_Flags::Weapons_locked);
+	}
+
+	// OF_No_collide removes a flag instead of setting one
+	if (parse_flags[Mission::Parse_Object_Flags::OF_No_collide])
+		object_flags.remove(Object::Object_Flags::Collides);
+}
+
+void resolve_parse_flags(const flagset<Mission::Parse_Object_Flags> &parse_flags, ship &s, bool no_ship_max_shield)
+{
+	auto &o = Objects[s.objnum];
+	auto &a = Ai_info[s.ai_index];
+
+	// don't set the flag if the mission is ongoing in a multiplayer situation. This will be set by the players in the
+	// game only before the game or during respawning.
+	// MWA -- changed the next line to remove the !(Game_mode & GM_MULTIPLAYER).  We shouldn't be setting
+	// this flag in single player mode -- it gets set in post process mission.
+	bool set_player_start_flag = (Fred_running || ((Game_mode & GM_MULTIPLAYER) && !(Game_mode & GM_IN_MISSION)));
+	bool player_start_flag_prev_status = o.flags[Object::Object_Flags::Player_ship];
+
+	if ((parse_flags[Mission::Parse_Object_Flags::OF_No_shields]) && (parse_flags[Mission::Parse_Object_Flags::OF_Force_shields_on]))
+		parse_warning_or_record("Ship %s has both the \"force-shields-on\" and \"no-shields\" flags; this is inconsistent.", s.ship_name);
+
+	resolve_parse_flags(parse_flags, o.flags, s.flags, a.ai_flags);
+
+	// post-resolution: don't set player-start if we shouldn't
+	if (!set_player_start_flag)
+		o.flags.set(Object::Object_Flags::Player_ship, player_start_flag_prev_status);
+
+	// post-resolution: apparently we don't want this flag in multiplayer?
+	if (Game_mode & GM_MULTIPLAYER)
+		s.flags.remove(Ship::Ship_Flags::Red_alert_store_status);
+
+	// post-resolution: handle "soft deprecation" of Immobile by setting the two half-flags, but only in FRED
+	// (FRED has dialog support for the two half-flags but not the legacy Immobile flag)
+	if (Fred_running && o.flags[Object::Object_Flags::Immobile])
+	{
+		o.flags.remove(Object::Object_Flags::Immobile);
+		o.flags.set(Object::Object_Flags::Dont_change_position);
+		o.flags.set(Object::Object_Flags::Dont_change_orientation);
+
+		// keep track of migrated ships
+		Fred_migrated_immobile_ships.insert(o.instance);
+	}
+
+	// post-resolution: force the shields on or off depending on flags -- but only if shield strength supports it
+	// no strength means we can't have shields, period
+	if (no_ship_max_shield)
+		o.flags.set(Object::Object_Flags::No_shields);
+	// force shields on means we have them regardless of other flags; per r5332 this ranks above the next check
+	else if (parse_flags[Mission::Parse_Object_Flags::OF_Force_shields_on])
+		o.flags.remove(Object::Object_Flags::No_shields);
+	// intrinsic no-shields means we have them off in-game
+	else if (!Fred_running && (Ship_info[s.ship_info_index].flags[Ship::Info_Flags::Intrinsic_no_shields]))
+		o.flags.set(Object::Object_Flags::No_shields);
+
+	//Individual ships in wings can't be reinforcements - FUBAR
+	if (s.wingnum >= 0 && s.flags[Ship::Ship_Flags::Reinforcement])
+	{
+		parse_warning_or_record("Ship %s is a reinforcement unit but is a member of a wing. Ignoring reinforcement flag.", s.ship_name);
+		s.flags.remove(Ship::Ship_Flags::Reinforcement);
+	}
 }
 
 void fix_old_special_explosions(p_object *p_objp, int variable_index) 
@@ -3254,6 +3242,19 @@ p_object::~p_object()
 	dock_free_dock_list(this);
 }
 
+p_object &p_object::operator=(p_object &&other) noexcept
+{
+	if (this != &other) {
+		// free our dock list, which the memberwise assignment below would otherwise overwrite (and leak)
+		dock_free_dock_list(this);
+
+		// shallow memberwise copy, then transfer ownership of the dock list by nulling the source's handle
+		*this = other;
+		other.dock_list = nullptr;
+	}
+	return *this;
+}
+
 const char* p_object::get_display_name() {
 	if (has_display_name()) {
 		return display_name.c_str();
@@ -3278,7 +3279,6 @@ extern int parse_warp_params(const WarpParams *inherit_from, WarpDirection direc
  */
 int parse_object(mission *pm, int  /*flag*/, p_object *p_objp)
 {
-	int	i;
     char name[NAME_LENGTH];
 	ship_info *sip;
 
@@ -3301,7 +3301,7 @@ int parse_object(mission *pm, int  /*flag*/, p_object *p_objp)
 		p_objp->flags.set(Mission::Parse_Object_Flags::SF_Has_display_name);
 	}
 
-	find_and_stuff("$Class:", &p_objp->ship_class, F_NAME, Ship_class_names, Ship_info.size(), "ship class");
+	find_and_stuff("$Class:", &p_objp->ship_class, F_NAME, Ship_class_names.data(), Ship_class_names.size(), "ship class");
 	if (p_objp->ship_class < 0)
 	{
 		if (Fred_running) {
@@ -3410,11 +3410,7 @@ int parse_object(mission *pm, int  /*flag*/, p_object *p_objp)
 			mprintf(("Using callsign: %s\n", name));
 	}
 
-	auto temp_team_names = std::unique_ptr<const char*[]>(new const char*[Iff_info.size()]);
-	for (i = 0; i < (int)Iff_info.size(); i++)
-		temp_team_names[i] = Iff_info[i].iff_name;
-
-	find_and_stuff("$Team:", &p_objp->team, F_NAME, temp_team_names.get(), Iff_info.size(), "team name");
+	find_and_stuff("$Team:", &p_objp->team, F_NAME, Iff_info_names.data(), Iff_info_names.size(), "team name");
 
 	// save current team for loadout purposes, so that in multi we always respawn
 	// from the original loadout slot even if the team changes
@@ -3452,7 +3448,7 @@ int parse_object(mission *pm, int  /*flag*/, p_object *p_objp)
 
 	if (optional_string("+AI Class:")) 
 	{
-		p_objp->ai_class = match_and_stuff(F_NAME, Ai_class_names, Num_ai_classes, "AI class");
+		p_objp->ai_class = match_and_stuff(F_NAME, Ai_class_names.data(), Num_ai_classes, "AI class");
 
 		if (p_objp->ai_class < 0) 
 		{
@@ -4126,7 +4122,7 @@ void parse_common_object_data(p_object *p_objp)
 
 		if (optional_string("+AI Class:"))
 		{
-			Subsys_status[i].ai_class = match_and_stuff(F_NAME, Ai_class_names, Num_ai_classes, "AI class");
+			Subsys_status[i].ai_class = match_and_stuff(F_NAME, Ai_class_names.data(), Num_ai_classes, "AI class");
 
 			if (Subsys_status[i].ai_class < 0)
 			{
@@ -4153,17 +4149,17 @@ void parse_common_object_data(p_object *p_objp)
 
 /**
  * Checks if any ships of a certain ship class are still available in the team loadout
- * @return The index of the ship in team_data->ship_list if found or -1 if it isn't
+ * @return The index of the entry in team_data->ship_choices if found or -1 if it isn't
  */
-int get_reassigned_index(team_data *current_team, int ship_class) 
+int get_reassigned_index(team_data *current_team, int ship_class)
 {
 	// Search through the available ships to see if there is a matching ship class in the loadout
-	for (int i=0; i < current_team->num_ship_choices; i++)
+	for (size_t i = 0; i < current_team->ship_choices.size(); ++i)
 	{
-		if (ship_class == current_team->ship_list[i])
+		if (ship_class == current_team->ship_choices[i].class_index)
 		{
-			if (current_team->ship_count[i] > 0) {
-				return i;
+			if (current_team->ship_choices[i].count > 0) {
+				return sz2i(i);
 			}
 			else {
 				return -1;
@@ -4175,65 +4171,60 @@ int get_reassigned_index(team_data *current_team, int ship_class)
 }
 
 /**
- * Updates the loadout quanities for a ship class.
+ * Takes one ship of this loadout entry, if any remain.
  */
-void update_loadout_totals(team_data *current_team, int loadout_index)
+void take_ship_from_loadout(team_data *current_team, int loadout_index)
 {
-	// Fix the loadout variables to show that the class has less available if there are still ships available
-	if (current_team->ship_count[loadout_index] > 0)
+	// Fix the loadout entry to show that the class has less available if there are still ships available
+	if (current_team->ship_choices[loadout_index].count > 0)
 	{
-		Assert (current_team->loadout_total > 0); 
-
-		current_team->ship_count[loadout_index]--;
-		current_team->loadout_total--;
+		current_team->ship_choices[loadout_index].count--;
 	}
 }
 
 /**
  * Attempts to set the class of this ship based which ship classes still remain unassigned in the ship loadout
- * The ship class specified by the mission file itself is tested first. Followed by the list of alt classes. 
+ * The ship class specified by the mission file itself is tested first, followed by the list of alt classes.
  * If an alt class flagged as default_to_this_class is reached the ship will be assigned to that class.
- * If the class can't be assigned because no ships of that class remain the function returns false.  
+ * If the class can't be assigned because no ships of that class remain, the function returns false.
  */
 bool is_ship_assignable(p_object *p_objp)
 {
-	int loadout_index = -1;
-
 	team_data *data_for_team = &Team_data[p_objp->team];
 
 	// First lets check if the ship specified in the mission file is of an assignable class
-	loadout_index = get_reassigned_index(data_for_team, p_objp->ship_class);
+	int loadout_index = get_reassigned_index(data_for_team, p_objp->ship_class);
 	if (loadout_index != -1 )
 	{
-		Assert (data_for_team->loadout_total > 0);
+		take_ship_from_loadout(data_for_team, loadout_index);
 
-		update_loadout_totals(data_for_team, loadout_index);
-			
 		// Since the ship in the mission file matched one available in the loadout we need go no further
 		return true;
 	}
 
 	// Now we check the alt_classes (if there are any)
-	for (SCP_vector<alt_class>::iterator pac = p_objp->alt_classes.begin(); pac != p_objp->alt_classes.end(); ++pac) {
+	int assigned_class = -1;
+	for (auto &pac : p_objp->alt_classes) {
 		// we don't check availability unless we are asked to
-		if (pac->default_to_this_class == false) {
-			loadout_index = pac->ship_class;
+		if (!pac.default_to_this_class) {
+			assigned_class = pac.ship_class;
 			break;
 		}
 		else {
-			loadout_index = get_reassigned_index(data_for_team, pac->ship_class);
+			loadout_index = get_reassigned_index(data_for_team, pac.ship_class);
 			if (loadout_index != -1 ) {
-				update_loadout_totals(data_for_team, loadout_index);
+				take_ship_from_loadout(data_for_team, loadout_index);
+				assigned_class = pac.ship_class;
 				break;
 			}
 		}
 	}
 
 	// If we managed to assign a class we'd may need to actually swap to it
-	if (loadout_index != -1 ) {
-		if (p_objp->ship_class != data_for_team->ship_list[loadout_index])
+	if (assigned_class != -1 ) {
+		if (p_objp->ship_class != assigned_class)
 		{
-			swap_parse_object(p_objp, data_for_team->ship_list[loadout_index]);
+			swap_parse_object(p_objp, assigned_class);
 		}
 		return true;
 	}
@@ -4263,43 +4254,28 @@ void process_loadout_objects()
 		}
 	}
 		
-	// Now we go though the ships we were unable to assign earlier and reassign them on a first come first 
+	// Now we go though the ships we were unable to assign earlier and reassign them on a first come first
 	// served basis.
 	for (size_t m=0; m < reassignments.size(); m++)
 	{
 		p_object *p_objp = &Parse_objects[reassignments[m]];
 		team_data *current_team = &Team_data[p_objp->team];
-		bool loadout_assigned = false;
         Assert(p_objp->flags[Mission::Parse_Object_Flags::SF_Set_class_dynamically]);
 
-		// First thing to check is whether we actually have any ships left to assign
-		if (current_team->loadout_total == 0)
+		// Go through the loadout until we find an unassigned ship.  If no ships remain
+		// anywhere in the loadout, the ship in the mission file is used as-is.
+		for (auto &entry : current_team->ship_choices)
 		{
-			// If there is nothing left to assign we should use the ship in the mission file
-			loadout_assigned = true;
-		}
-		// We do have ships left in the team loadout that we can assign
-		else
-		{
-			// Go through the loadout until we find an unassigned ship
-			for (int j=0; j < current_team->num_ship_choices; j++)
+			if (entry.count > 0)
 			{
-				if (current_team->ship_count[j] > 0)
-				{
-					update_loadout_totals(current_team, j);
-					// We will need to assign a new class too (if a p_object the same class was available
-					// it should have been assigned by attempt_loadout_assignation_from_defaults()
-					Assert (p_objp->ship_class != current_team->ship_list[j]);
-					swap_parse_object(p_objp, current_team->ship_list[j]);
-
-					loadout_assigned = true;
-					break ;
-				}
+				entry.count--;
+				// We will need to assign a new class too (if a p_object the same class was available
+				// it should have been assigned by attempt_loadout_assignation_from_defaults()
+				Assert (p_objp->ship_class != entry.class_index);
+				swap_parse_object(p_objp, entry.class_index);
+				break;
 			}
 		}
-			
-		// We should never reach here with an unassigned loadout
-		Assert (loadout_assigned);
 	}
 }
 
@@ -4685,7 +4661,25 @@ int parse_wing_create_ships( wing *wingp, int num_to_create, bool force_create, 
 		wingp->total_arrived_count++;
 		if (wingp->num_waves > 1)
 		{
+			char pre_bash_name[NAME_LENGTH];
+			strcpy_s(pre_bash_name, p_objp->name);
+
 			wing_bash_ship_name(p_objp, wingp, wingp->total_arrived_count + wingp->red_alert_skipped_ships);
+
+			// if the bash renamed this parse object (which can happen if the ship was saved using the legacy
+			// hash format), re-key its not-yet-present registry entry so that the old name doesn't shadow
+			// lookups of the new name.  (For subsequent waves, the pre-bash name belongs to a previous wave's
+			// ship, whose entry must keep its key; the status and parse object checks exclude that case.)
+			if (stricmp(pre_bash_name, p_objp->name) != 0)
+			{
+				auto ship_it = Ship_registry_map.find(pre_bash_name);
+				if (ship_it != Ship_registry_map.end()
+					&& Ship_registry[ship_it->second].status == ShipStatus::NOT_YET_PRESENT
+					&& Ship_registry[ship_it->second].pobj_num == POBJ_INDEX(p_objp))
+				{
+					ship_registry_rename(ship_it->second, p_objp->name, true);
+				}
+			}
 
 			// subsequent waves of ships will not be in the ship registry, so add them
 			if (!ship_registry_exists(p_objp->name))
@@ -4697,6 +4691,12 @@ int parse_wing_create_ships( wing *wingp, int num_to_create, bool force_create, 
 				Ship_registry.push_back(entry);
 				Ship_registry_map[p_objp->name] = static_cast<int>(Ship_registry.size() - 1);
 			}
+		}
+		// make sure we still handle wing display names in a single-wave wing
+		else if (wingp->has_display_name())
+		{
+			wing_bash_ship_name(p_objp->display_name, wingp->get_display_name(), wingp->total_arrived_count + wingp->red_alert_skipped_ships);
+			p_objp->flags.set(Mission::Parse_Object_Flags::SF_Has_display_name);
 		}
 
 		// also, if multiplayer, set the parse object's net signature to be wing's net signature
@@ -5212,6 +5212,10 @@ void parse_wing(mission *pm)
 	// Goober5000 - wing creation stuff moved to post_process_ships_wings
 }
 
+// Per-prop field handling here MUST stay in sync with:
+//   Fred_mission_save::save_props() in missionsave.cpp
+//   clone_prop_instance_data() in missioneditor/objectduplication.cpp
+// When you add a new editable prop field, touch all three.
 void parse_prop(mission* /*pm*/)
 {
 	parsed_prop p;
@@ -5702,18 +5706,22 @@ void parse_event(mission *pm)
 
 	if ( optional_string("+Trigger Count:")){
 		stuff_int( &(event->trigger_count) );
-		event->flags |= MEF_USING_TRIGGER_COUNT; 
 
-		// if we have a trigger count but no repeat count, we want the event to loop until it has triggered enough times
-		if (event->repeat_count == 1) {
-			event->repeat_count = -1;
-		}
-
-		// sanity check on the trigger count variable
+		// sanity check on the trigger count variable; do this first so the != 1 check below is correct
 		// negative trigger count is also legal
 		if ( event->trigger_count == 0 ){
 			parse_warning_or_record("Trigger count for mission event %s is 0 — must be >= 1 or negative; corrected to 1.", event->name.c_str());
 			event->trigger_count = 1;
+		}
+
+		// a trigger count of 1 is the default, so the field only has runtime effect when it's something else
+		if (event->trigger_count != 1) {
+			event->flags |= MEF_USING_TRIGGER_COUNT;
+
+			// if we have a trigger count but no repeat count, we want the event to loop until it has triggered enough times
+			if (event->repeat_count == 1) {
+				event->repeat_count = -1;
+			}
 		}
 	}
 
@@ -5884,6 +5892,10 @@ void parse_goals(mission *pm)
 		throw parse::ParseException("Number of goals is too high and breaks multi!");
 }
 
+// Per-waypoint-path field handling here MUST stay in sync with:
+//   Fred_mission_save::save_waypoints() (waypoint-list section) in missionsave.cpp
+//   clone_waypoint_path_instance_data() in missioneditor/objectduplication.cpp
+// When you add a new editable waypoint-path field, touch all three.
 void parse_waypoint_list(mission *pm)
 {
 	Assert(pm != NULL);
@@ -5935,6 +5947,10 @@ void parse_waypoint_list(mission *pm)
 	}
 }
 
+// The jump-node section of this function MUST stay in sync with:
+//   Fred_mission_save::save_waypoints() (jump-node section) in missionsave.cpp
+//   clone_jump_node_instance_data() in missioneditor/objectduplication.cpp
+// When you add a new editable jump-node field, touch all three.
 void parse_waypoints_and_jumpnodes(mission *pm)
 {
 	vec3d pos;
@@ -6042,25 +6058,19 @@ void parse_messages(mission *pm, int flags)
 
 void parse_reinforcement(mission *pm)
 {
-	reinforcements *ptr;
+	reinforcements reinforcement;
 	p_object *rforce_obj = NULL;
 	int instance = -1;
 
-	Assert(Num_reinforcements < MAX_REINFORCEMENTS);
 	Assert(pm != NULL);
-	ptr = &Reinforcements[Num_reinforcements];
 
 	required_string("$Name:");
-	stuff_string(ptr->name, F_NAME, NAME_LENGTH);	
+	stuff_string(reinforcement.name, F_NAME, NAME_LENGTH);
 
-	find_and_stuff("$Type:", &ptr->type, F_NAME, Reinforcement_type_names, Num_reinforcement_type_names, "reinforcement type");
+	find_and_stuff("$Type:", &reinforcement.type, F_NAME, Reinforcement_type_names, Num_reinforcement_type_names, "reinforcement type");
 
 	required_string("$Num times:");
-	stuff_int(&ptr->uses);
-	ptr->num_uses = 0;
-
-	// reset the flags to 0
-	ptr->flags = 0;
+	stuff_int(&reinforcement.uses);
 
 	if ( optional_string("+Arrival delay:") )
 	{
@@ -6068,34 +6078,34 @@ void parse_reinforcement(mission *pm)
 		stuff_int(&delay);
 		if (delay < 0)
 		{
-			parse_warning_or_record("Arrival delay on reinforcement %s cannot be negative — corrected to 0.", ptr->name);
+			parse_warning_or_record("Arrival delay on reinforcement %s cannot be negative — corrected to 0.", reinforcement.name);
 			delay = 0;
 		}
 
-		ptr->arrival_delay = delay;
+		reinforcement.arrival_delay = delay;
 	}
 
 	if ( optional_string("+No Messages:") ){
-		stuff_string_list( ptr->no_messages, MAX_REINFORCEMENT_MESSAGES );
+		stuff_string_list( reinforcement.no_messages, MAX_REINFORCEMENT_MESSAGES );
 	}
 
 	if ( optional_string("+Yes Messages:") ){
-		stuff_string_list( ptr->yes_messages, MAX_REINFORCEMENT_MESSAGES );
+		stuff_string_list( reinforcement.yes_messages, MAX_REINFORCEMENT_MESSAGES );
 	}	
 
 	// sanity check on the names of reinforcements
-	rforce_obj = mission_parse_find_parse_object(ptr->name);
+	rforce_obj = mission_parse_find_parse_object(reinforcement.name);
 
 	if (rforce_obj == NULL) {
-		if ((instance = wing_name_lookup(ptr->name, 1)) == -1) {
-			parse_warning_or_record("Reinforcement %s not found as ship or wing — declaration ignored.", ptr->name);
+		if ((instance = wing_name_lookup(reinforcement.name, 1)) == -1) {
+			parse_warning_or_record("Reinforcement %s not found as ship or wing — declaration ignored.", reinforcement.name);
 			return;
 		}
 	} else {
 		// Individual ships in wings can't be reinforcements - FUBAR
 		if (rforce_obj->wingnum >= 0)
 		{
-			parse_warning_or_record("Reinforcement %s is part of a wing — reinforcement declaration ignored.", ptr->name);
+			parse_warning_or_record("Reinforcement %s is part of a wing — reinforcement declaration ignored.", reinforcement.name);
 			return;
 		}
 		else
@@ -6107,10 +6117,10 @@ void parse_reinforcement(mission *pm)
 	// now, if the reinforcement is a wing, then set the number of waves of the wing == number of
 	// uses of the reinforcement
 	if (instance >= 0) {
-		Wings[instance].num_waves = ptr->uses;
+		Wings[instance].num_waves = reinforcement.uses;
 	}
 
-	Num_reinforcements++;
+	Reinforcements.push_back(std::move(reinforcement));
 }
 
 void parse_reinforcements(mission *pm)
@@ -6895,7 +6905,11 @@ bool post_process_mission(mission *pm)
 		return false;
 	}
 	Player_start_shipnum = player_start_entry->shipnum;
-	Assert( Player_start_shipnum != -1 );
+	if (Player_start_shipnum < 0) {
+		// the ship exists in the mission file but its first wave was never created
+		Warning(LOCATION, "Player start ship '%s' was not created at mission start!  If the wing containing the player has a custom arrival cue, the cue must evaluate to true at the beginning of the mission.  Similarly, if the wing arrives from a hangar bay, the mothership must be present at the beginning of the mission.", Player_start_shipname);
+		return false;
+	}
 	Player_start_pobject = player_start_entry->p_objp();
 	Assert( Player_start_pobject != NULL );
 
@@ -7119,7 +7133,10 @@ bool post_process_mission(mission *pm)
 	}
 	Last_file_checksum = Current_file_checksum;
 
-	if (pm->volumetrics)
+	// Skip the volumetric noise bake under FRED. Only the gameplay deferred
+	// pass and the Lab consume the baked 3D bitmap, and the bake can take
+	// minutes in a debug build for higher quality nebulae.
+	if (pm->volumetrics && !Fred_running)
 		pm->volumetrics->renderVolumeBitmap();
 
 	apply_default_custom_data(pm);
@@ -7288,6 +7305,12 @@ void support_ship_info::reset()
 	ship_class = -1;                   // ship class will be determined by the summoning ship's species
 	tally = 0;
 	support_available_for_species = 0; // will be filled in by the next loop
+	for (auto& team_pool : rearm_weapon_pool) {
+		team_pool.clear(); // absent == rearm_pool_default()
+	}
+	disallow_rearm = false;
+	allow_rearm_weapon_precedence = false;
+	rearm_pool_from_loadout = false;
 
 	// for each species, store whether support is available
 	for (int species = 0; species < sz2i(Species_info.size()); species++) {
@@ -7333,7 +7356,7 @@ void mission_init(mission *pm, bool quick_init)
 	Parse_names.clear();
 	Num_path_restrictions = 0;
 	Num_ai_dock_names = 0;
-	ai_clear_goal_target_names();
+	Goal_target_names.clear();
 
 	for (int i = 0; i < MAX_CARGO; i++)
 		Cargo_names[i] = Cargo_names_buf[i]; // make a pointer array for compatibility
@@ -7372,7 +7395,7 @@ void mission_init(mission *pm, bool quick_init)
 	for (int i = 0; i < MAX_WINGS; i++)
 		Wings[i].clear();
 	
-	Num_reinforcements = 0;
+	Reinforcements.clear();
 
 	Parse_props.clear();
 
@@ -7401,16 +7424,10 @@ void mission_init(mission *pm, bool quick_init)
 // info such as game type, number of players etc. or whether we are importing from a different format.
 bool parse_main(const char *mission_name, int flags)
 {
-	int i;
 	bool rval;
 
-	Assert(Ship_info.size() <= MAX_SHIP_CLASSES);
+	Parsing_mission = true;
 
-	// fill in Ship_class_names array with the names from the ship_info struct
-	i = 0;
-	for (auto it = Ship_info.begin(); it != Ship_info.end(); i++, ++it)
-		Ship_class_names[i] = it->name;
-	
 	do {
 		// don't do this for imports
 		if (!(flags & MPF_IMPORT_FSM) && !(flags & MPF_IMPORT_XWI)) {
@@ -7498,6 +7515,8 @@ bool parse_main(const char *mission_name, int flags)
 			break;
 		}
 	} while (0);
+
+	Parsing_mission = false;
 
 	if (!Fred_running)
 		strcpy_s(Mission_filename, mission_name);
@@ -7940,6 +7959,17 @@ int mission_parse_get_multi_mission_info( const char *filename )
 	return The_mission.num_players;
 }
 
+static p_object *mission_parse_get_arrival_ship_sub(const char *name)
+{
+	for (auto p_objp : list_range(&Ship_arrival_list))
+	{
+		if (!stricmp(p_objp->name, name))
+			return p_objp;	// still on the arrival list
+	}
+
+	return nullptr;
+}
+
 /**
  * @brief				Returns the parse object on the ship arrival list associated with the given name.
  * @param[in] name		The name of the object
@@ -7950,18 +7980,18 @@ int mission_parse_get_multi_mission_info( const char *filename )
  */
 p_object *mission_parse_get_arrival_ship(const char *name)
 {
-	p_object *p_objp;
-
 	if (name == nullptr)
 		return nullptr;
 
-	for (p_objp = GET_FIRST(&Ship_arrival_list); p_objp != END_OF_LIST(&Ship_arrival_list); p_objp = GET_NEXT(p_objp))
-	{
-		if (!stricmp(p_objp->name, name)) 
-		{
-			return p_objp;	// still on the arrival list
-		}
-	}
+	// try the normal lookup
+	auto p_objp = mission_parse_get_arrival_ship_sub(name);
+	if (p_objp)
+		return p_objp;
+
+	// also search for ship names hashed using the legacy format
+	SCP_string legacy_hashed;
+	if (wing_bash_legacy_hashed_ship_name(legacy_hashed, name))
+		return mission_parse_get_arrival_ship_sub(legacy_hashed.c_str());
 
 	return nullptr;
 }
@@ -8128,6 +8158,7 @@ int mission_set_arrival_location(anchor_t anchor, ArrivalLocation location, int 
 				vm_vec_negate(&rand_vec);
 		} else {
 			UNREACHABLE("Unknown location type discovered when trying to parse %s -- Please let an SCP coder know!", Ships[shipnum].ship_name);
+			rand_vec = vmd_zero_vector;
 		}
 
 		// add in the radius of the two ships involved.  This will make the ship arrive further than
@@ -8161,27 +8192,24 @@ int mission_set_arrival_location(anchor_t anchor, ArrivalLocation location, int 
 /**
  * Mark a reinforcement as available
  */
-void mission_parse_mark_reinforcement_available(char *name)
+void mission_parse_mark_reinforcement_available(const char *name)
 {
-	int i;
-	reinforcements *rp;
+	int i = find_item_with_string(Reinforcements, &reinforcements::name, name);
+	if (i >= 0)
+	{
+		auto &r = Reinforcements[i];
+		if (!(r.flags & RF_IS_AVAILABLE))
+		{
+			r.flags |= RF_IS_AVAILABLE;
 
-	for (i = 0; i < Num_reinforcements; i++) {
-		rp = &Reinforcements[i];
-		if ( !stricmp(rp->name, name) ) {
-			if ( !(rp->flags & RF_IS_AVAILABLE) ) {
-				rp->flags |= RF_IS_AVAILABLE;
-
-				// tell all of the clients.
-				if ( MULTIPLAYER_MASTER ) {
-					send_reinforcement_avail( i );
-				}
-			}
-			return;
+			// tell all of the clients.
+			if (MULTIPLAYER_MASTER)
+				send_reinforcement_avail(i);
 		}
+		return;
 	}
 
-	Assert ( i < Num_reinforcements );
+	Warning(LOCATION, "Reinforcement '%s' not found!", name);
 }
 
 /**
@@ -8207,12 +8235,9 @@ int mission_did_ship_arrive(p_object *objp, bool force_arrival)
 
 		// if we're forcing the arrival, then "use" the reinforcement; otherwise don't process anything else
 		if (force_arrival) {
-			for (int i = 0; i < Num_reinforcements; i++) {
-				auto rp = &Reinforcements[i];
-				if (!stricmp(rp->name, objp->name)) {
-					rp->num_uses++;
-					break;
-				}
+			int i = find_item_with_string(Reinforcements, &reinforcements::name, objp->name);
+			if (i >= 0) {
+				Reinforcements[i].num_uses++;
 			}
 		} else {
 			return -1;
@@ -8464,12 +8489,9 @@ bool mission_maybe_make_wing_arrive(int wingnum, bool force_arrival)
 
 		// if we're forcing the arrival, then "use" the reinforcement; otherwise don't process anything else
 		if (force_arrival && wingp->current_count == 0) {
-			for (int i = 0; i < Num_reinforcements; i++) {
-				auto rp = &Reinforcements[i];
-				if (!stricmp(rp->name, wingp->name)) {
-					rp->num_uses++;
-					break;
-				}
+			int i = find_item_with_string(Reinforcements, &reinforcements::name, wingp->name);
+			if (i >= 0) {
+				Reinforcements[i].num_uses++;
 			}
 		} else {
 			// reinforcement wings skip the rest of the function
@@ -9670,6 +9692,24 @@ bool check_for_25_1_data()
 
 	if (count_items_with_value(Props) > 0)
 		return true;
+
+	if (The_mission.flags[Mission::Mission_Flags::Fullneb] && !Neb2_fog_save_legacy_values)
+		return true;
+
+	if (The_mission.flags[Mission::Mission_Flags::Limited_support_rearm_pool]) {
+		return true;
+	}
+
+	if (The_mission.support_ships.disallow_rearm || The_mission.support_ships.allow_rearm_weapon_precedence ||
+		The_mission.support_ships.rearm_pool_from_loadout) {
+		return true;
+	}
+
+	for (int team = 0; team < Num_teams; ++team) {
+		if (!The_mission.support_ships.rearm_weapon_pool[team].empty()) {
+			return true;
+		}
+	}
 
 	constexpr auto defaultLayer = "Default";
 

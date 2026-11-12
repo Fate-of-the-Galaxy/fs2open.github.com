@@ -1083,8 +1083,10 @@ void asteroid_delete( object * obj )
 
 	asp = &Asteroids[num];
 
-	if (asp->model_instance_num >= 0)
+	if (asp->model_instance_num >= 0) {
 		model_delete_instance(asp->model_instance_num);
+		asp->model_instance_num = -1;
+	}
 
 	if (asp->target_objnum >= 0) {
 		for (asteroid_target& target : Asteroid_targets) {
@@ -1437,9 +1439,9 @@ int asteroid_check_collision(object *pasteroid, object *other_obj, vec3d *hitpos
 		// everything above was calculated relative to the heavy's position
 		vec3d actual_world_hit_pos = mc.hit_point_world + heavy_obj->pos;
 		if ((shipp->is_arriving()) && (shipp->warpin_effect != nullptr))
-			warp_effect = shipp->warpin_effect;
+			warp_effect = shipp->warpin_effect.get();
 		else if ((shipp->flags[Ship::Ship_Flags::Depart_warp]) && (shipp->warpout_effect != nullptr))
-			warp_effect = shipp->warpout_effect;
+			warp_effect = shipp->warpout_effect.get();
 
 		if (warp_effect != nullptr && point_is_clipped_by_warp(&actual_world_hit_pos, warp_effect))
 			mc_ret_val = 0;
@@ -1691,7 +1693,7 @@ static void asteroid_do_area_effect(object *asteroid_objp)
 		if ( weapon_area_calc_damage(ship_objp, &asteroid_objp->pos, asip->inner_rad, asip->outer_rad, asip->blast, asip->damage, &blast, &damage, asip->outer_rad) == -1 )
 			continue;
 
-		ship_apply_global_damage(ship_objp, asteroid_objp, &asteroid_objp->pos, damage, asip->damage_type_idx);
+		ship_apply_global_damage(ship_objp, asteroid_objp, &asteroid_objp->pos, damage, asip->damage_type_idx, DamageSource::Explosion);
 		weapon_area_apply_blast(nullptr, ship_objp, &asteroid_objp->pos, blast, false);
 	}	// end for
 }

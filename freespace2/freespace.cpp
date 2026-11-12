@@ -20,6 +20,7 @@
 #endif // !_MINGW
 #else
 #ifdef APPLE_APP
+ #include <sys/sysctl.h>
  #include <sys/types.h>
  #include <libproc.h>
 #endif
@@ -122,6 +123,7 @@
 #include "missionui/missionweaponchoice.h"
 #include "missionui/redalert.h"
 #include "mod_table/mod_table.h"
+#include "model/modelrender.h"
 #include "model/modelreplace.h"
 #include "nebula/neb.h"
 #include "nebula/neblightning.h"
@@ -204,13 +206,13 @@
 #include "weapon/weapon.h"
 
 
-#include <SDL.h>
-#include <SDL_main.h>
+#include <SDL3/SDL_main.h>
 
 #include <cinttypes>
 #include <stdexcept>
 
 #include "imgui.h"
+#include "implot.h"
 
 #ifdef WIN32
 // According to AMD and NV, these _should_ force their drivers into high-performance mode
@@ -256,6 +258,7 @@ struct big_expl_flash {
 #define FRAME_FILTER 16
 
 #define DEFAULT_SKILL_LEVEL	1
+static int Default_skill_level = DEFAULT_SKILL_LEVEL; // can be overridden by default_settings.tbl
 int	Game_skill_level = DEFAULT_SKILL_LEVEL;
 
 static SCP_string skill_level_display(int value)
@@ -271,6 +274,7 @@ static void parse_skill_func()
 	value -= 1; // Parse 1-5 for the skill levels but convert to our internal 0-4
 	CLAMP(value, 0, 4);
 
+	Default_skill_level = value;
 	Game_skill_level = value;
 }
 
@@ -281,7 +285,7 @@ static auto GameSkillOption __UNUSED = options::OptionBuilder<int>("Game.SkillLe
                      .category(std::make_pair("Game", 1824))
                      .range(0, 4)
                      .level(options::ExpertLevel::Beginner)
-                     .default_func([]() { return DEFAULT_SKILL_LEVEL; })
+                     .default_func([]() { return Default_skill_level; })
                      .bind_to(&Game_skill_level)
                      .display(skill_level_display)
                      .importance(1)
@@ -619,7 +623,7 @@ const fs_builtin_mission *game_find_builtin_mission(const char *filename)
 
 int game_get_default_skill_level()
 {
-	return DEFAULT_SKILL_LEVEL;
+	return Default_skill_level;
 }
 
 // Resets the flash
@@ -820,6 +824,21 @@ void game_sunspot_process(float frametime)
 }
 
 
+// Top/bottom bar height for the "dead view" / supernova letterbox
+static int dead_view_letterbox_yborder()
+{
+	return gr_screen.max_h / 4;
+}
+
+// Apply the clip rect for the "dead view" / supernova letterbox interior
+static void set_dead_view_letterbox_clip()
+{
+	int yborder = dead_view_letterbox_yborder();
+	//	Numeric constants encouraged by J "pig farmer" S, who shall remain semi-anonymous.
+	// J.S. I've changed my ways!! See the new "no constants" code!!!
+	gr_set_clip(0, yborder, gr_screen.max_w, gr_screen.max_h - yborder*2, GR_RESIZE_NONE);
+}
+
 /**
  * Call once a frame to diminish the flash effect to 0.
  * @param frametime Period over which to dimish at ::DIMINISH_RATE
@@ -903,7 +922,18 @@ static void game_flash_diminish(float frametime)
 		if ( b < 0 ) b = 0; else if ( b > 255 ) b = 255;
 
 		if ( (r!=0) || (g!=0) || (b!=0) ) {
+			// the letterbox bars are drawn earlier in the frame, but game_render_hud calls gr_reset_clip()
+			// before this runs, so the flash would paint over the bars unless we re-apply the letterbox clip
+			bool letterbox_active = (Game_mode & GM_DEAD) || (supernova_stage() >= SUPERNOVA_STAGE::HIT);
+			if (letterbox_active) {
+				set_dead_view_letterbox_clip();
+			}
+
 			gr_flash( r, g, b );
+
+			if (letterbox_active) {
+				gr_reset_clip();
+			}
 		}
 	}
 	
@@ -957,9 +987,10 @@ void game_level_close()
 		particle::ParticleManager::get()->clearSources();
 		particle::close();
 		trail_level_close();
-		ship_close_cockpit_displays(Player_ship);
+		ship_level_close();
 		hud_level_close();
 		hud_escort_clear_all();
+		common_select_level_close();	// usually already done on the state change, but not under a scripted UI
 		model_instance_free_all();
 		batch_render_close();
 
@@ -992,9 +1023,6 @@ void game_level_close()
 			// of letting it use a bunch of memory
 			extern void model_deallocate_interp_data();
 			model_deallocate_interp_data();
-
-			extern void model_collide_free_point_list();
-			model_collide_free_point_list();
 		}
 	}
 	else
@@ -1182,6 +1210,8 @@ void game_do_networking()
 
 int Game_loading_callback_inited = 0;
 int Game_loading_background = -1;
+int Game_loading_default_bground_w = 0;
+int Game_loading_default_bground_h = 0;
 generic_anim Game_loading_ani;
 
 static int Game_loading_ani_coords[GR_NUM_RESOLUTIONS][2] = {
@@ -1224,14 +1254,36 @@ void game_loading_callback(int count)
 		framenum = new_framenum;
 
 	if ( Game_loading_ani.num_frames > 0 )	{
+		int ani_x = Game_loading_ani_coords[gr_screen.res][0];
+		int ani_y = Game_loading_ani_coords[gr_screen.res][1];
+		float ani_scale = 1.0f;
+
 		GR_MAYBE_CLEAR_RES(Game_loading_background);
 		if ( Game_loading_background > -1 )	{
+			int bg_w, bg_h;
+			bm_get_info(Game_loading_background, &bg_w, &bg_h);
+
+			// the animation is assumed to match the default background, or the default layout if there is none
+			bool have_default = (Game_loading_default_bground_w > 0) && (Game_loading_default_bground_h > 0);
+			float ref_w = i2fl(have_default ? Game_loading_default_bground_w : gr_screen.max_w_unscaled);
+			float ref_h = i2fl(have_default ? Game_loading_default_bground_h : gr_screen.max_h_unscaled);
+
+			// fit the reference into the background the way menus are fit into the screen:
+			// scaled by the limiting dimension and centered in the other
+			ani_scale = MIN(i2fl(bg_w) / ref_w, i2fl(bg_h) / ref_h);
+			ani_x = fl2i(i2fl(ani_x) * ref_w / i2fl(gr_screen.max_w_unscaled) * ani_scale + (i2fl(bg_w) - ref_w * ani_scale) / 2.0f);
+			ani_y = fl2i(i2fl(ani_y) * ref_h / i2fl(gr_screen.max_h_unscaled) * ani_scale + (i2fl(bg_h) - ref_h * ani_scale) / 2.0f);
+
+			// set the screen scale to the background's dimensions
+			gr_set_screen_scale(bg_w, bg_h);
 			gr_set_bitmap( Game_loading_background );
 			gr_bitmap(0,0,GR_RESIZE_MENU);
 		}
 
 		gr_set_bitmap( Game_loading_ani.first_frame + framenum );
-		gr_bitmap(Game_loading_ani_coords[gr_screen.res][0],Game_loading_ani_coords[gr_screen.res][1], GR_RESIZE_MENU);
+		gr_bitmap(ani_x, ani_y, GR_RESIZE_MENU, false, ani_scale);
+
+		gr_reset_screen_scale();
 
 		do_flip = 1;
 	}
@@ -1277,9 +1329,17 @@ void game_loading_callback_init()
 	Assert( Game_loading_callback_inited==0 );
 
 	Game_loading_background = bm_load(The_mission.loading_screen[gr_screen.res]);
-	
+
 	if (Game_loading_background < 0)
 		Game_loading_background = bm_load(Game_loading_bground_fname[gr_screen.res]);
+
+	Game_loading_default_bground_w = 0;
+	Game_loading_default_bground_h = 0;
+	int default_bground = bm_load(Game_loading_bground_fname[gr_screen.res]);
+	if (default_bground >= 0) {
+		bm_get_info(default_bground, &Game_loading_default_bground_w, &Game_loading_default_bground_h);
+		bm_release(default_bground);
+	}
 
 	generic_anim_init(&Game_loading_ani, Game_loading_ani_fname[gr_screen.res]);
 	generic_anim_load(&Game_loading_ani);
@@ -1732,10 +1792,85 @@ DCF(force_fullscreen, "Forces game to startup in fullscreen mode")
 
 int	Framerate_delay = 0;
 
-#ifdef FS2_VOICER
-// This is really awful but thank the guys of X11 for naming something "Window"
-#	include "SDL_syswm.h" // For SDL_SysWMinfo
+static const char *get_exe_name(const char *argv0)
+{
+	// Doing this the hard way, rather than using SCP_string, so that we're only
+	// using a single ptr's worth of memory to figure it out
+
+	static const char *exe_name = nullptr;
+
+	if (exe_name == nullptr) {
+		if ( !argv0 ) {
+			return "";
+		}
+
+		for (auto i = strlen(argv0) - 1; i > 0; --i) {
+			if (argv0[i] == DIR_SEPARATOR_CHAR) {
+				exe_name = argv0 + i + 1;
+				break;
+			}
+		}
+
+		if ( !exe_name ) {
+			exe_name = argv0;
+		}
+	}
+
+	return exe_name;
+}
+
+static const char *get_cpu_type()
+{
+	// In some cases the SDL_Has*() functions will just report the architecture
+	// that the SDL lib was built with or what emulation says. A M-series Mac
+	// running a x86_64 binary will report as x86 instead of ARM, for instance.
+	// A similar thing happens with WOW64 Windows processes. So use native
+	// functionality where possible to get true values and use SDL functions
+	// only as fallback.
+
+#ifdef _WIN32
+	typedef BOOL (WINAPI *ISWOW64PROCESS2PTR)(HANDLE, USHORT*, USHORT*);
+
+	USHORT processArch = 0, nativeArch = 0;
+	HMODULE hKernel32 = LoadLibraryA("kernel32.dll");
+
+	if (hKernel32) {
+		ISWOW64PROCESS2PTR pIsWow64Process2 = reinterpret_cast<ISWOW64PROCESS2PTR>(GetProcAddress(hKernel32, "IsWow64Process2"));
+
+		if (pIsWow64Process2) {
+			HANDLE hProcess = GetCurrentProcess();
+
+			if (hProcess) {
+				pIsWow64Process2(hProcess, &processArch, &nativeArch);
+				CloseHandle(hProcess);
+			}
+		}
+
+		FreeLibrary(hKernel32);
+	}
+
+	if (nativeArch == IMAGE_FILE_MACHINE_ARM64) {
+		return "ARM64";
+	}
+#elif defined(APPLE_APP)
+	int val = 0;
+	size_t valSize = sizeof(val);
+
+	if ( !sysctlbyname("hw.optional.arm64", &val, &valSize, nullptr, 0) ) {
+		if (val == 1) {
+			return "ARM64";
+		}
+	}
 #endif
+
+	if (SDL_HasARMSIMD() || SDL_HasNEON()) {
+		return "ARM";
+	} else if (SDL_HasSSE() || SDL_HasAVX()) {
+		return "x86";
+	}
+
+	return "<unknown>";
+}
 
 /**
  * Game initialisation
@@ -1752,6 +1887,7 @@ void game_init()
 	Random::seed(static_cast<unsigned int>(time(nullptr)));
 
 	ImGui::CreateContext();
+	ImPlot::CreateContext();
 
 	Framerate_delay = 0;
 
@@ -1774,13 +1910,19 @@ void game_init()
 		nprintf(("Network", "Standalone running\n"));
 	}
 
+	mprintf(("Platform: %s\n", SDL_GetPlatform()));
+	mprintf(("CPU: %s, %d logical cores\n", get_cpu_type(), SDL_GetNumLogicalCPUCores()));
+	mprintf(("Memory: %d MiB\n", SDL_GetSystemRAM()));
+	mprintf(("Build: %s, " SIZE_T_ARG "-bit, %s-endian\n", get_exe_name(nullptr),
+			 sizeof(void*) << 3, (SDL_BYTEORDER == SDL_LIL_ENDIAN) ? "little" : "big"));
+
 	// init os stuff next
 	os_init( Osreg_class_name, Window_title.c_str(), Osreg_app_name );
 
 	threading::init_task_pool();
 
 #ifndef NDEBUG
-	mprintf(("FreeSpace 2 Open version: %s\n", FS_VERSION_FULL));
+	mprintf(("FreeSpace Open version: %s\n", FS_VERSION_FULL));
 
 	extern void cmdline_debug_print_cmdline();
 	cmdline_debug_print_cmdline();
@@ -1884,11 +2026,7 @@ void game_init()
 		sdlGraphicsOperations.reset(new SDLGraphicsOperations());
 	}
 
-	int graphics_api = GR_DEFAULT;
-	if (Cmdline_vulkan)
-		graphics_api = GR_VULKAN;
-
-	if (!gr_init(std::move(sdlGraphicsOperations), graphics_api)) {
+	if (!gr_init(std::move(sdlGraphicsOperations))) {
 		os::dialogs::Message(os::dialogs::MESSAGEBOX_ERROR, "Error initializing graphics!");
 		exit(1);
 		return;
@@ -1905,13 +2043,13 @@ void game_init()
 #ifdef FS2_VOICER
 	if(Cmdline_voice_recognition)
 	{
-		SDL_SysWMinfo info;
-		SDL_VERSION(&info.version); // initialize info structure with SDL version info
-
+		auto hwnd = static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(os::getSDLMainWindow()),
+															 SDL_PROP_WINDOW_WIN32_HWND_POINTER,
+															 nullptr));
 		bool voiceRectOn = false;
-		if(SDL_GetWindowWMInfo(os::getSDLMainWindow(), &info)) { // the call returns true on success
+		if(hwnd) { // the call returns true on success
 			// success
-			voiceRectOn = VOICEREC_init(info.info.win.window, WM_RECOEVENT, GRAMMARID1, IDR_CMD_CFG);
+			voiceRectOn = VOICEREC_init(hwnd, WM_RECOEVENT, GRAMMARID1, IDR_CMD_CFG);
 		} else {
 			// call failed
 			mprintf(( "Couldn't get window information: %s\n", SDL_GetError() ));
@@ -2217,27 +2355,9 @@ void game_show_framerate()
 	}
 #endif
 
-	if ((Show_framerate && HUD_draw) || Cmdline_frame_profile || Cmdline_bmpman_usage) {
+	if ((Show_framerate && HUD_draw) || Cmdline_bmpman_usage) {
 
 		gr_set_color_fast(&HUD_color_debug);
-
-		if (Cmdline_frame_profile) {
-			// Split frame profile into two columns if necessary to avoid losing trace data
-			int fp_start_y = gr_screen.center_offset_y + 100 + line_height;
-			int fp_line_limit = (gr_screen.max_h - fp_start_y) / line_height;
-			size_t fp_column_break = 0;
-			auto fp_trace_str = tracing::get_frame_profile_output();
-
-			for (int i = 0; i < fp_line_limit && fp_column_break < fp_trace_str.length(); i++) {
-				fp_column_break = fp_trace_str.find_first_of('\n', fp_column_break+1);
-			}
-
-			gr_string(gr_screen.center_offset_x + 20, fp_start_y, fp_trace_str.substr(0,fp_column_break).c_str(), GR_RESIZE_NONE);
-
-			if (fp_column_break < fp_trace_str.length()) {
-				gr_string(gr_screen.max_w / 2, fp_start_y, fp_trace_str.substr(fp_column_break, fp_trace_str.npos).c_str(), GR_RESIZE_NONE);
-			}
-		}
 
 		if (Show_framerate) {
 			if (frametotal != 0.0f)
@@ -2279,15 +2399,15 @@ void game_show_framerate()
 		MEMORYSTATUSEX mem_stats;
 		mem_stats.dwLength = sizeof(mem_stats);
 		if (GlobalMemoryStatusEx(&mem_stats)) {
-			sprintf(mem_buffer, "Physical Free: %" PRIu64 " / %" PRIu64 " Meg", mem_stats.ullAvailPhys / 1024 / 1024, mem_stats.ullTotalPhys / 1024 / 1024);
+			sprintf(mem_buffer, "Physical Free: " UINT64_T_ARG " / " UINT64_T_ARG " Meg", mem_stats.ullAvailPhys / 1024 / 1024, mem_stats.ullTotalPhys / 1024 / 1024);
 			gr_string(sx, sy, mem_buffer.c_str(), GR_RESIZE_NONE);
 			sy += line_height;
 
-			sprintf(mem_buffer, "Pagefile Free: %" PRIu64 " / %" PRIu64 " Meg", mem_stats.ullAvailPageFile / 1024 / 1024, mem_stats.ullTotalPageFile / 1024 / 1024);
+			sprintf(mem_buffer, "Pagefile Free: " UINT64_T_ARG " / " UINT64_T_ARG " Meg", mem_stats.ullAvailPageFile / 1024 / 1024, mem_stats.ullTotalPageFile / 1024 / 1024);
 			gr_string(sx, sy, mem_buffer.c_str(), GR_RESIZE_NONE);
 			sy += line_height;
 
-			sprintf(mem_buffer, "Virtual Free:  %" PRIu64 " / %" PRIu64 " Meg", mem_stats.ullAvailVirtual / 1024 / 1024, mem_stats.ullTotalVirtual / 1024 / 1024);
+			sprintf(mem_buffer, "Virtual Free:  " UINT64_T_ARG " / " UINT64_T_ARG " Meg", mem_stats.ullAvailVirtual / 1024 / 1024, mem_stats.ullTotalVirtual / 1024 / 1024);
 			gr_string(sx, sy, mem_buffer.c_str(), GR_RESIZE_NONE);
 		}
 	}
@@ -2574,18 +2694,15 @@ void game_set_view_clip(float  /*frametime*/)
 	if ((Game_mode & GM_DEAD) || (supernova_stage() >= SUPERNOVA_STAGE::HIT))
 	{
 		// Set the clip region for the letterbox "dead view"
-		int yborder = gr_screen.max_h/4;
-
 		if (g3_in_frame() == 0) {
+			int yborder = dead_view_letterbox_yborder();
 			// Ensure that the bars are black
 			gr_set_color(0,0,0);
 			gr_set_bitmap(0); // Valathil - Don't ask me why this has to be here but otherwise the black bars don't draw
 			gr_rect(0, 0, gr_screen.max_w, yborder, GR_RESIZE_NONE);
 			gr_rect(0, gr_screen.max_h-yborder, gr_screen.max_w, yborder, GR_RESIZE_NONE);
 		} else {
-			//	Numeric constants encouraged by J "pig farmer" S, who shall remain semi-anonymous.
-			// J.S. I've changed my ways!! See the new "no constants" code!!!
-			gr_set_clip(0, yborder, gr_screen.max_w, gr_screen.max_h - yborder*2, GR_RESIZE_NONE );	
+			set_dead_view_letterbox_clip();
 		}
 	}
 	else {
@@ -2983,7 +3100,7 @@ void say_view_target()
 				}
 
 			default:
-				UNREACHABLE("Trying to view an invalid object!");
+				UNREACHABLE("Trying to view an invalid object %d!", Objects[Player_ai->target_objnum].type);
 				break;
 			}
 
@@ -3527,7 +3644,7 @@ void game_render_frame( camid cid, const vec3d* offset, const matrix* rot_offset
 		stars_draw(1,1,1,0,0);
 	}
 
-	shadows_render_all(Proj_fov, &Eye_matrix, &Eye_position);
+	shadows_render_all(Proj_fov, &Eye_matrix, &Eye_position, offset, rot_offset, fov_override);
 	obj_render_queue_all();
 
 	// render all ships with shader effects on them
@@ -4314,10 +4431,6 @@ void game_frame(bool paused)
 	// process lightning (nebula only)
 	nebl_process();
 
-	if (Cmdline_frame_profile) {
-		tracing::frame_profile_process_frame();
-	}
-
 	DEBUG_GET_TIME( total_time2 )
 
 #ifndef NDEBUG
@@ -4620,6 +4733,11 @@ int game_check_key()
 
 bool pause_if_unfocused()
 {
+	// nobody is at the keyboard in a noninteractive run, so losing focus must not stop it
+	if (Cmdline_noninteractive) {
+		return false;
+	}
+
 	if (Using_in_game_options) {
 		return UnfocusedPauseOption->getValue();
 	} else {
@@ -5159,8 +5277,8 @@ void game_process_event( int current_state, int event )
 			break;
 
 		case GS_EVENT_GAME_INIT:
-			// see if the command line option has been set to use the last pilot, and act accordingly
-			if( player_select_get_last_pilot() ) {	
+			// see if the command line has been set to select a pilot automatically, and act accordingly
+			if( player_select_try_auto_select() ) {
 				// always enter the main menu -- do the automatic network startup stuff elsewhere
 				// so that we still have valid checks for networking modes, etc.
 				gameseq_set_state(GS_STATE_MAIN_MENU);
@@ -5262,6 +5380,10 @@ static bool going_to_menu_state(int new_state)
 void game_leave_state( int old_state, int new_state )
 {
 	events::GameLeaveState(old_state, new_state);
+
+	// Clear cached UI model instances when changing game states.
+	// New state UI screens can lazily recreate any instances they need.
+	model_clear_cached_ui_render_instances();
 
 	int end_mission = 1;
 
@@ -5782,6 +5904,13 @@ void game_enter_state( int old_state, int new_state )
 		scripting::hook_param("OldState", 'o', l_GameState.Set(gamestate_h(old_state))),
 		scripting::hook_param("NewState", 'o', l_GameState.Set(gamestate_h(new_state))));
 
+	// consume the flag before any script override, so that it can't remain set for a later main hall entry
+	bool pilot_just_committed = false;
+	if (new_state == GS_STATE_MAIN_MENU) {
+		pilot_just_committed = Player_select_pilot_just_committed;
+		Player_select_pilot_just_committed = false;
+	}
+
 	if(scripting::hooks::OnStateStart->isActive()) {
 		if (scripting::hooks::OnStateStart->isOverride(script_param_list)) {
 			scripting::hooks::OnStateStart->run(std::move(script_param_list));
@@ -5810,8 +5939,8 @@ void game_enter_state( int old_state, int new_state )
 			}
 
 			// determine which ship this guy is currently based on
-			// if we are seeing the main hall for the first time, allow falling back when the current campaign isn't available
-			const auto result = mission_load_up_campaign(old_state == GS_STATE_INITIAL_PLAYER_SELECT);
+			// if we have just selected a pilot, allow falling back when the current campaign isn't available
+			const auto result = mission_load_up_campaign(pilot_just_committed);
 
 			// if there was a problem, pass an empty main hall which will set up appropriate defaults
 			if (result != 0) {
@@ -6068,8 +6197,7 @@ void game_enter_state( int old_state, int new_state )
 
 #ifndef NDEBUG
 			// required to truely make mouse deltas zeroed in debug mouse code
-void mouse_force_pos(int x, int y);
-			mouse_force_pos(gr_screen.max_w / 2, gr_screen.max_h / 2);
+			mouse_force_pos(gr_screen.max_w / 2.0f, gr_screen.max_h / 2.0f);
 #endif
 
 			game_flush();
@@ -6764,8 +6892,7 @@ void game_spew_pof_info()
 	if(out == nullptr){
 		BAIL();
 	}	
-	int counted = 0;
-	for(int idx=0; idx<num_files; idx++, counted++){
+	for(int idx=0; idx<num_files; idx++){
 		sprintf(str, "%s.pof", pof_list[idx]);
 		int model_num = model_load(str);
 		if(model_num >= 0){
@@ -6867,9 +6994,13 @@ int game_main(int argc, char *argv[])
 	tmp_mem = nullptr;
 #endif // _WIN32
 
-
 	if ( !parse_cmdline(argc, argv) ) {
 		return 1;
+	}
+
+	if (LoggingEnabled) {
+		// passing an argument will set the name
+		get_exe_name(argv[0]);
 	}
 
 	game_init();
@@ -6914,7 +7045,7 @@ int game_main(int argc, char *argv[])
 		scripting::hooks::OnIntroAboutToPlay->run();
 	}
 
-	if (!Is_standalone && !skip_intro) {
+	if (!Is_standalone && !skip_intro && !player_select_auto_select_requested()) {
 		movie::play("intro.mve");
 	}
 
@@ -7047,6 +7178,7 @@ void game_shutdown(void)
 		std_deinit_standalone();
 	}
 
+	ImPlot::DestroyContext();
 	ImGui::DestroyContext();
 
 	os_cleanup();
@@ -8050,9 +8182,23 @@ int main(int argc, char *argv[])
 	int result = -1;
 	Assert(argc > 0);
 
+	// Metadata must to be set as early as possible, before the first SDL_Init().
+	// This is global info and cannot be changed later (i.e., it can't be set per mod)
+	SDL_SetAppMetadata("FreeSpace Open", FS_VERSION_FULL, "us.indiegames.scp.FreeSpaceOpen");
+
+	SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_TYPE_STRING, "game");
+	SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_COPYRIGHT_STRING,
+							   "Copyright 1999 Volition, Inc. & Copyright 2002-2026 The Source Code Project.");
+
 	crashdump::installCrashHandler();
 
 #ifdef WIN32
+#ifndef __MINGW32__
+	// Report leaks when the CRT shuts down, i.e. after static destructors have run.  Calling
+	// _CrtDumpMemoryLeaks() at the end of main() would report every global container as a leak.
+	_CrtSetDbgFlag(_CrtSetDbgFlag(_CRTDBG_REPORT_FLAG) | _CRTDBG_LEAK_CHECK_DF);
+#endif
+
 	// Don't let more than one instance of FreeSpace run.
 	HWND hwnd = FindWindow(NOX("FreeSpaceClass"), nullptr);
 	if (hwnd)	{
@@ -8092,9 +8238,8 @@ int main(int argc, char *argv[])
     if (strcmp("/sbin/launchd", pathbuf) == 0) {
         // Finder sets the working directory to the root of the drive so we have to get a little creative
         // to find out where on the disk we should be running from for CFILE's sake.
-        char *path_name = SDL_GetBasePath();
+        auto path_name = SDL_GetBasePath();
         chdir(path_name);
-        SDL_free(path_name);
     }
 #endif
 #endif
@@ -8133,11 +8278,14 @@ int main(int argc, char *argv[])
 	SCP_mspdbcs_Cleanup();
 
 	::CoUninitialize();
-
-#ifndef __MINGW32__
-	_CrtDumpMemoryLeaks();
-#endif
 #endif
 
 	return result;
 }
+
+#ifdef __ANDROID__
+extern "C" int android_main(int argc, char* argv[])
+{
+	return main(argc, argv);
+}
+#endif

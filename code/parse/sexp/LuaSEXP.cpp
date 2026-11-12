@@ -262,8 +262,9 @@ luacpp::LuaValue LuaSEXP::sexpToLua(int node, int argnum, int parent_node) const
 		return LuaValue::createValue(_action.getLuaState(), l_Weaponclass.Set(weapon_info_lookup(name)));
 	}
 	case OPF_GAME_SND: {
-		auto name = CTEXT(node);
-		return LuaValue::createValue(_action.getLuaState(), l_SoundEntry.Set(sound_entry_h(gamesnd_get_by_name(name))));
+		// handle a table index, an operator, or a name (matching what the core SEXPs accept);
+		// -1 or <none> yields an invalid handle that the script can check with :isValid()
+		return LuaValue::createValue(_action.getLuaState(), l_SoundEntry.Set(sound_entry_h(sexp_get_sound_index(node))));
 	}
 	case OPF_STRING: {
 		auto text = CTEXT(node);
@@ -304,13 +305,13 @@ luacpp::LuaValue LuaSEXP::sexpToLua(int node, int argnum, int parent_node) const
 
 		auto ship_entry = eval_ship(this_node);
 
-		if (!ship_entry || !ship_entry->has_shipp()) {
-			// Name is invalid
-			return LuaValue::createValue(_action.getLuaState(), l_Ship.Set(object_h()));
+		if (!ship_entry || !ship_entry->has_objp()) {
+			// Ship is not present in the mission (never arrived, destroyed, or departed)
+			return LuaValue::createValue(_action.getLuaState(), l_Subsystem.Set(ship_subsys_h()));
 		}
 
 		ship_subsys* ss = ship_get_subsys(ship_entry->shipp(), name);
-		
+
 		return LuaValue::createValue(_action.getLuaState(), l_Subsystem.Set(ship_subsys_h(ship_entry->objp(), ss)));
 	}
 	case OPF_DOCKER_POINT: {
@@ -334,7 +335,7 @@ luacpp::LuaValue LuaSEXP::sexpToLua(int node, int argnum, int parent_node) const
 		auto ship_entry = eval_ship(this_node);
 		if (!ship_entry || !ship_entry->has_shipp()) {
 			// Name is invalid
-			return LuaValue::createValue(_action.getLuaState(), l_Ship.Set(object_h()));
+			return LuaValue::createValue(_action.getLuaState(), l_Dockingbay.Set(dockingbay_h()));
 		}
 
 		auto docker_pm = model_get(Ship_info[ship_entry->shipp()->ship_info_index].model_num);
@@ -375,8 +376,8 @@ luacpp::LuaValue LuaSEXP::sexpToLua(int node, int argnum, int parent_node) const
 			auto text = CTEXT(node);
 			return LuaValue::createValue(_action.getLuaState(), text);
 		} else {
-			UNREACHABLE(
-				"Unhandled argument type! Someone added an argument type but didn't add handling code to execute().");
+			Assertion(false,
+				"Unhandled argument type '%s'! Someone added an argument type but didn't add handling code to execute().", argtype.first.c_str());
 			return LuaValue::createNil(_action.getLuaState());
 		}
 	}
