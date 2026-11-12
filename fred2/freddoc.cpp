@@ -360,7 +360,10 @@ bool CFREDDoc::load_mission(const char *pathname, int flags) {
 		if (!Team_data[i].do_not_validate) {
 			for (const auto &[weapon_class, count] : used_pool) {
 				if (count != 0) {
-					Warning(LOCATION, "%s is used in wings of team %d but was not in the loadout. Fixing now", Weapon_info[weapon_class].name, i + 1);
+					// suppress the warning when importing an X-Wing mission, since this is as good a place as any to fix the loadout
+					if (!(flags & MPF_IMPORT_XWI)) {
+						Warning(LOCATION, "%s is used in wings of team %d but was not in the loadout. Fixing now", Weapon_info[weapon_class].name, i + 1);
+					}
 
 					// add the weapon as a new entry
 					auto &entry = Team_data[i].weapon_choices.emplace_back();
